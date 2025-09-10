@@ -357,6 +357,11 @@ internal class Homesystem
             return TextCommandResult.Success(Lang.Get("th3essentials:hs-empty"));
         }
 
+        if (name.Contains('<') || name.Contains('>'))
+        {
+            return TextCommandResult.Success(Lang.Get("th3essentials:hs-bad-characters"));
+        }
+
         var playerData = _playerConfig.GetPlayerDataByUid(player.PlayerUID);
         if (playerData.HomePoints.Count >= GetPlayerHomeLimit(args.Caller.Player, playerData))
         {
