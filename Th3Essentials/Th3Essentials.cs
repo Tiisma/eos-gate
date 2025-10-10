@@ -26,6 +26,7 @@ using Vintagestory.Server;
 namespace Th3Essentials;
 
 public delegate void PlayerWithRewardJoin(IServerPlayer player, string discordRewardId);
+public delegate void Th3DiscordReady(Th3Discord discord);
 
 // ReSharper disable once ClassNeverInstantiated.Global
 public class Th3Essentials : ModSystem
@@ -42,11 +43,18 @@ public class Th3Essentials : ModSystem
 
     internal ICoreServerAPI Sapi = null!;
 
-    private Th3Discord? _th3Discord;
+    public Th3Discord? Th3Discord { get; private set; }
 
     private long _restartListener;
 
+    /// <summary>
+    /// Can be used to attach logic when a player joins with a reward role
+    /// </summary>
     public event PlayerWithRewardJoin? OnPlayerWithRewardJoin;
+    /// <summary>
+    /// Fired once Th3Discord is initialized. In this event you can start registering your own commands and events to it see the public delegates.
+    /// </summary>
+    public event Th3DiscordReady? OnTh3DiscordReady;
 
     public override bool ShouldLoad(EnumAppSide forSide)
     {
@@ -97,8 +105,9 @@ public class Th3Essentials : ModSystem
 
         if (Config.IsDiscordConfigured())
         {
-            _th3Discord = new Th3Discord();
-            _th3Discord.Init(this);
+            Th3Discord = new Th3Discord();
+            Th3Discord.Init(this);
+            OnTh3DiscordReady?.Invoke(Th3Discord);
         }
         else
         {
@@ -194,7 +203,7 @@ public class Th3Essentials : ModSystem
                     ? Lang.Get("th3essentials:restart-in-min")
                     : Lang.Get("th3essentials:restart-in-mins", timeInMinutes);
                 SendInGameServerMsg(msg);
-                _th3Discord?.SendServerMessage(msg);
+                Th3Discord?.SendServerMessage(msg);
                 Sapi.Logger.Event(msg);
             }
         }
@@ -233,7 +242,7 @@ public class Th3Essentials : ModSystem
             Sapi.Logger.Warning(
                 $"SaveFileSize: {fileInfo.Length / 1000000} MB, FreeDiskSpace: {freeDiskSpace / 1000000} MB");
             Sapi.Logger.Error("Not enought disk space left to create a backup");
-            _th3Discord?.SendServerMessage(Lang.Get("th3essentials:backup-dc"));
+            Th3Discord?.SendServerMessage(Lang.Get("th3essentials:backup-dc"));
             return;
         }
 
@@ -246,7 +255,7 @@ public class Th3Essentials : ModSystem
         var backupFileName = $"{worldName}-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.vcdbs";
 
         Sapi.Logger.Event(Lang.Get("th3essentials:backup"));
-        _th3Discord?.SendServerMessage(Lang.Get("th3essentials:backup-dc"));
+        Th3Discord?.SendServerMessage(Lang.Get("th3essentials:backup-dc"));
 
         gameDatabase.CreateBackup(backupFileName);
     }
@@ -278,7 +287,7 @@ public class Th3Essentials : ModSystem
     {
         var msg = Th3Util.ExtractDeathMessage(byPlayer, damageSource);
 
-        _th3Discord?.SendServerMessage(msg);
+        Th3Discord?.SendServerMessage(msg);
     }
 
     private void GameWorldSave()
@@ -315,7 +324,7 @@ public class Th3Essentials : ModSystem
 
     public override void Dispose()
     {
-        _th3Discord?.Dispose();
+        Th3Discord?.Dispose();
         Sapi.Event.GameWorldSave -= GameWorldSave;
         Sapi.Event.PlayerNowPlaying -= PlayerNowPlaying;
         Sapi.Event.UnregisterGameTickListener(_restartListener);

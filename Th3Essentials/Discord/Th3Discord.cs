@@ -26,11 +26,20 @@ public class Th3Discord
 
     public static Th3Discord Instance { get; private set; } = null!;
 
-    private DiscordSocketClient _client = null!;
+    public DiscordSocketClient Client { get; private set; } = null!;
 
-    private IMessageChannel? _discordChannel;
-    private IMessageChannel? _adminLogChannel;
-    private IMessageChannel? _systemChannel;
+    /// <summary>
+    /// Channel for sending player chat messages
+    /// </summary>
+    public IMessageChannel? DiscordChannel { get; private set; }
+    /// <summary>
+    /// Channel for sending admin log messages
+    /// </summary>
+    public IMessageChannel? AdminLogChannel { get; private set; }
+    /// <summary>
+    /// Channel for sending system notifications like join / leave messages
+    /// </summary>
+    public IMessageChannel? SystemChannel { get; private set; }
 
     internal ICoreServerAPI Sapi = null!;
 
@@ -39,6 +48,32 @@ public class Th3Discord
     internal Th3DiscordConfig Config = null!;
 
     private bool _initialized;
+
+    public delegate void HandleSlashCommand(Th3Discord th3Discord, SocketSlashCommand command);
+
+    public delegate void HandleButtonExecuted(Th3Discord th3Discord, SocketMessageComponent component);
+    public delegate ApplicationCommandProperties CreateSlashCommand();
+
+    /// <summary>
+    /// return the command you want to be added to the discord guild will require to run !setupth3essentials or auto add commands needs to be turned on 
+    /// </summary>
+    public event CreateSlashCommand? OnCreateSlashCommand;
+
+    /// <summary>
+    /// This is the callback for all SlashCommands you have to check if this is your command that should be run
+    ///
+    /// See the discord library's
+    /// <see cref="DiscordSocketClient.SlashCommandExecuted"/>
+    /// </summary>
+    public event HandleSlashCommand? OnHandleSlashCommand;
+
+    /// <summary>
+    /// This is the callback for all ButtonExecuted you have to check if this is your button action that should be run. 
+    ///
+    /// See the discord library's
+    /// <see cref="DiscordSocketClient.ButtonExecuted"/>
+    /// </summary>
+    public event HandleButtonExecuted? OnHandleButtonExecuted;
 
     public static string[] TemporalStorm { get; } = {
         Lang.Get("A light temporal storm is approaching"),
@@ -79,10 +114,10 @@ public class Th3Discord
             config.AlwaysDownloadUsers = true;
         }
 
-        _client = new DiscordSocketClient(config);
+        Client = new DiscordSocketClient(config);
 
-        _client.Ready += ReadyAsync;
-        _client.Log += DiscordLog;
+        Client.Ready += ReadyAsync;
+        Client.Log += DiscordLog;
 
         Sapi.Server.LogVerboseDebug("Discord started");
 
@@ -170,15 +205,15 @@ public class Th3Discord
 
     public async void BotMainAsync()
     {
-        await _client.LoginAsync(TokenType.Bot, Config.Token);
-        await _client.StartAsync();
+        await Client.LoginAsync(TokenType.Bot, Config.Token);
+        await Client.StartAsync();
     }
 
     private Task ReadyAsync()
     {
         try
         {
-            Sapi.Server.LogVerboseDebug($"{_client.CurrentUser.GlobalName} is connected!");
+            Sapi.Server.LogVerboseDebug($"{Client.CurrentUser.GlobalName} is connected!");
 
             if (!GetDiscordChannel())
             {
@@ -189,9 +224,9 @@ public class Th3Discord
             if (!_initialized)
             {
 
-                _client.MessageReceived += MessageReceivedAsync;
-                _client.SlashCommandExecuted += InteractionCreated;
-                _client.ButtonExecuted += ButtonExecuted;
+                Client.MessageReceived += MessageReceivedAsync;
+                Client.SlashCommandExecuted += SlashCommandExecuted;
+                Client.ButtonExecuted += ButtonExecuted;
 
                 //add vs api events
                 Sapi.Event.PlayerChat += PlayerChatAsync;
@@ -213,7 +248,7 @@ public class Th3Discord
 
                 if (Config.Rewards && Config.RewardIdToName != null)
                 {
-                    var guild = _client.GetGuild(Config.GuildId);
+                    var guild = Client.GetGuild(Config.GuildId);
                     foreach (var role in Config.RewardIdToName)
                     {
                         var socketRole = guild.Roles.First((r) => r.Id == ulong.Parse(role.Key));
@@ -225,7 +260,7 @@ public class Th3Discord
                 {
                     Task.Run(async () =>
                     {
-                        var guild = _client.GetGuild(Config.GuildId);
+                        var guild = Client.GetGuild(Config.GuildId);
                         var applicationCommandsAsync = await guild.GetApplicationCommandsAsync();
                         var commands = Enum.GetNames(typeof(SlashCommands)).Select(x => x.ToLower());
                         var discordCommands = applicationCommandsAsync.Select(x => x.Name.ToLower()).ToList();
@@ -250,9 +285,25 @@ public class Th3Discord
 
     private void CreateSlashCommands()
     {
+        List<ApplicationCommandProperties> addonCommands = new();
         try
         {
-            Th3SlashCommands.CreateGuildCommands(_client, Sapi);
+            if (OnCreateSlashCommand != null)
+            {
+                foreach (var handleSlashCommand in OnCreateSlashCommand.GetInvocationList())
+                {
+                    var command = ((CreateSlashCommand)handleSlashCommand)();
+                    addonCommands.Add(command);
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            Sapi.Logger.Error(exception);
+        }
+        try
+        {
+            Th3SlashCommands.CreateGuildCommands(Client, Sapi, addonCommands);
         }
         catch (Exception exception)
         {
@@ -261,31 +312,69 @@ public class Th3Discord
         }
     }
 
-    private Task InteractionCreated(SocketSlashCommand command)
+    private Task SlashCommandExecuted(SocketSlashCommand command)
     {
         Th3SlashCommands.HandleSlashCommand(this, command);
+        try
+        {
+            if (OnHandleSlashCommand != null)
+            {
+                foreach (var handleSlashCommand in OnHandleSlashCommand.GetInvocationList())
+                {
+                    handleSlashCommand.DynamicInvoke(this, command);
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            Sapi.Logger.Error(exception);
+        }
         return Task.CompletedTask;
     }
 
     private Task ButtonExecuted(SocketMessageComponent component)
     {
         Th3SlashCommands.HandleButtonExecuted(this, component);
+        
+        try
+        {
+            if (OnHandleButtonExecuted != null)
+            {
+                foreach (var handleButtonExecuted in OnHandleButtonExecuted.GetInvocationList())
+                {
+                    handleButtonExecuted.DynamicInvoke(this, component);
+                    // ((HandleButtonExecuted)handleButtonExecuted)(this, component);
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            Sapi.Logger.Error(exception);
+        }
         return Task.CompletedTask;
     }
 
-    internal void SendServerMessage(string msg)
+    /// <summary>
+    /// Send a message to the system channel in discord if it is configured
+    /// </summary>
+    /// <param name="msg"></param>
+    public void SendServerMessage(string msg)
     {
-        _ = _systemChannel?.SendMessageAsync(ServerMsg(msg));
+        _ = SystemChannel?.SendMessageAsync(ServerMsg(msg));
     }
 
-    internal void SendAdminLog(string msg)
+    /// <summary>
+    /// Send a message to the admin log channel in discord if it is configured
+    /// </summary>
+    /// <param name="msg"></param>
+    public void SendAdminLog(string msg)
     {
-        _ = _adminLogChannel?.SendMessageAsync(msg);
+        _ = AdminLogChannel?.SendMessageAsync(msg);
     }
 
     private Task MessageReceivedAsync(SocketMessage messageParam)
     {
-        if (messageParam.Author.Id == _client.CurrentUser.Id)
+        if (messageParam.Author.Id == Client.CurrentUser.Id)
         {
             return Task.CompletedTask;
         }
@@ -344,30 +433,30 @@ public class Th3Discord
 
     internal bool GetDiscordChannel()
     {
-        _discordChannel = _client.GetChannel(Config.ChannelId) as IMessageChannel;
+        DiscordChannel = Client.GetChannel(Config.ChannelId) as IMessageChannel;
         if (Config.AdminLogChannelId != 0)
         {
-            _adminLogChannel = _client.GetChannel(Config.AdminLogChannelId) as IMessageChannel;
-            if (_adminLogChannel == null)
+            AdminLogChannel = Client.GetChannel(Config.AdminLogChannelId) as IMessageChannel;
+            if (AdminLogChannel == null)
             {
                 Sapi.Logger.Warning($"AdminLogChannelId: {Config.AdminLogChannelId} is not a valid channel. You will not see any admin messages");
             }
         }
         if (Config.SystemChannelId != 0)
         {
-            _systemChannel = _client.GetChannel(Config.SystemChannelId) as IMessageChannel;
+            SystemChannel = Client.GetChannel(Config.SystemChannelId) as IMessageChannel;
 
-            if (_systemChannel == null)
+            if (SystemChannel == null)
             {
                 Sapi.Logger.Warning($"SystemChannelId: {Config.SystemChannelId} is not a valid channel. Falling back to use the ChannelId for SystemChannelId");
-                _systemChannel = _discordChannel;
+                SystemChannel = DiscordChannel;
             }
         }
         else
         {
-            _systemChannel = _discordChannel;
+            SystemChannel = DiscordChannel;
         }
-        return _discordChannel != null;
+        return DiscordChannel != null;
     }
 
     private string CleanDiscordMessage(SocketMessage message)
@@ -388,7 +477,7 @@ public class Th3Discord
                     }
                     else if (mUser is SocketUnknownUser)
                     {
-                        var rgUser = _client.Rest.GetGuildUserAsync(Config.GuildId, mUser.Id).GetAwaiter().GetResult();
+                        var rgUser = Client.Rest.GetGuildUserAsync(Config.GuildId, mUser.Id).GetAwaiter().GetResult();
                         name = rgUser.DisplayName;
                     }
                     msg = Regex.Replace(msg, $"<@!?{user.Groups[1].Value}>", $"@{name}");
@@ -435,7 +524,7 @@ public class Th3Discord
 
     private void PlayerChatAsync(IServerPlayer byPlayer, int channelId, ref string message, ref string data, BoolRef consumed)
     {
-        if (Config.DiscordChatRelay && _discordChannel != null && channelId == GlobalConstants.GeneralChatGroup)
+        if (Config.DiscordChatRelay && DiscordChannel != null && channelId == GlobalConstants.GeneralChatGroup)
         {
             var playerMsg = Regex.Match(message, "> (.+)");
             var msg = playerMsg.Groups[1].Value;
@@ -463,7 +552,7 @@ public class Th3Discord
                     msg = $"**{byPlayer.PlayerName}:** {msg}";
                 }
             }
-            _ = _discordChannel.SendMessageAsync(msg);
+            _ = DiscordChannel.SendMessageAsync(msg);
         }
 
         if (Th3Essentials.Config.ShowRole && (Th3Essentials.Config.ShowRoles == null || Th3Essentials.Config.ShowRoles.Contains(byPlayer.Role.Code)))
@@ -500,6 +589,7 @@ public class Th3Discord
 
         if (!isConnecting)
         {
+            // TODO add some chaching and send larger messages on shutdown to not run into rate discord limit
             SendServerMessage(Lang.Get("th3essentials:disconnected", byPlayer.PlayerName, players, Sapi.Server.Config.MaxClients));
         }
         if (Config.Rewards)
@@ -519,7 +609,7 @@ public class Th3Discord
         byPlayer.ServerData.CustomPlayerData.Remove(REWARDS_SERVER_DATA_KEY);
         if (!Config.LinkedAccounts.TryGetValue(byPlayer.PlayerUID, out var discordId)) return;
 
-        var guild = _client.GetGuild(Config.GuildId);
+        var guild = Client.GetGuild(Config.GuildId);
         var socketGuildUser = guild.GetUser(ulong.Parse(discordId));
 
         foreach (KeyValuePair<string, string> role in Config.RewardIdToName)
@@ -540,30 +630,30 @@ public class Th3Discord
     {
         players += Sapi.Server.Players.Count(pl => pl.ConnectionState is EnumClientState.Connected or EnumClientState.Playing);
         players = Math.Max(0, players);
-        _ = _client.SetGameAsync(Lang.Get("th3essentials:bot-status", players, Sapi.Server.Config.MaxClients));
+        _ = Client.SetGameAsync(Lang.Get("th3essentials:bot-status", players, Sapi.Server.Config.MaxClients));
         return players;
     }
 
     private async void Shutdown()
     {
-        if (_systemChannel != null)
+        if (SystemChannel != null)
         {
-            _ = await _systemChannel.SendMessageAsync(ServerMsg(Lang.Get("th3essentials:shutdown")));
+            _ = await SystemChannel.SendMessageAsync(ServerMsg(Lang.Get("th3essentials:shutdown")));
         }
-        await _client.StopAsync();
-        await _client.LogoutAsync();
+        await Client.StopAsync();
+        await Client.LogoutAsync();
     }
 
     public void Dispose()
     {
-        _client.Ready -= ReadyAsync;
+        Client.Ready -= ReadyAsync;
 
         if (_initialized)
         {
             _initialized = false;
-            _client.MessageReceived -= MessageReceivedAsync;
-            _client.SlashCommandExecuted -= InteractionCreated;
-            _client.ButtonExecuted -= ButtonExecuted;
+            Client.MessageReceived -= MessageReceivedAsync;
+            Client.SlashCommandExecuted -= SlashCommandExecuted;
+            Client.ButtonExecuted -= ButtonExecuted;
 
             Sapi.Event.PlayerChat -= PlayerChatAsync;
             Sapi.Event.PlayerDisconnect -= PlayerDisconnectAsync;

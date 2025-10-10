@@ -21,7 +21,7 @@ public enum SlashCommands
 
 public abstract class Th3SlashCommands
 {
-    public static void CreateGuildCommands(DiscordSocketClient client, ICoreServerAPI sapi)
+    public static void CreateGuildCommands(DiscordSocketClient client, ICoreServerAPI sapi, List<ApplicationCommandProperties> addonCommands)
     {
         var commands = new ApplicationCommandProperties[]
         {
@@ -43,6 +43,10 @@ public abstract class Th3SlashCommands
             Kick.CreateCommand(),
             ChangeRole.CreateCommand(sapi)
         };
+        if (addonCommands.Count > 0)
+        {
+            commands = addonCommands.Concat(commands).ToArray();
+        }
         var created = client.Rest.BulkOverwriteGuildCommands(commands, Th3Discord.Instance.Config.GuildId).GetAwaiter().GetResult();
             
         sapi.Logger.Notification($"Discord Slashcommands created: {string.Join(", ", created.Select(c => c.Name))}");
