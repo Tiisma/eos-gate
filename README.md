@@ -380,6 +380,8 @@ Further change the config value `IsDirty:false` to `IsDirty:true` and run `/auto
   "AdminRoles": null,
   
   // enable the ingame /warp command
+  // Warp can only be set by an admin and players can then warp to a locatio
+  // but normal players can not add their own warps if you want that look at the home system  
   "WarpEnabled": false,
   // if this value is -1 then it will use the homesystems cooldown and homepoint last used timer else it will use its own timer
   "WarpCooldown" : -1,
