@@ -92,6 +92,7 @@ Download the mod and put it into your mods folder. Start your server once to gen
   - /announce - announce a message from discord to ingame chat [Admin or Configured Role]
   - /reloadconfig - reload the th3config.json and the restart timer [Admin or Configured Role]
   - /changerole allows to change the role of a player [Admin or Configured Role]
+  - /kick Kick a player from the server [Admin or Configured Role]
 
 - Shutdownsystem
 
