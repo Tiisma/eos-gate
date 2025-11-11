@@ -91,7 +91,7 @@ public abstract class Kick
 
         var serverMain = (ServerMain)discord.Sapi.World;
         var client = serverMain.Clients[splayer.ClientId];
-        _ = Task.Run(() =>
+        serverMain.EnqueueMainThreadTask(() =>
         {
             try
             {
