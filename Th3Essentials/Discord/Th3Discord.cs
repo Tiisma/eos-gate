@@ -121,7 +121,7 @@ public class Th3Discord
 
         Sapi.Server.LogVerboseDebug("Discord started");
 
-        if (Sapi.World.Config.GetBool("temporalStability", true))
+        if (Config.ShowTempStormWarnings && Sapi.World.Config.GetBool("temporalStability", true))
         {
             _harmony ??= new Harmony(_harmonyPatchkey);
             var original = AccessTools.Method(typeof(SystemTemporalStability), "onTempStormTick");

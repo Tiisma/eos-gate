@@ -41,4 +41,5 @@ public class Th3DiscordConfig
     };
 
     public bool AutoAddSlashCommands = false;
+    public bool ShowTempStormWarnings = true;
 }

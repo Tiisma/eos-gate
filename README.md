@@ -266,7 +266,9 @@ Further change the config value `IsDirty:false` to `IsDirty:true` and run `/auto
     "DiscordChatRelay": true,
     
     // Enable automatic adding of new slashcommands, will only add new ones and not update old ones. To update old ones run !setupth3essentials in the channel to use for the bot
-    "AutoAddSlashCommands": false
+    "AutoAddSlashCommands": false,
+    // when set to true temporal storm warnings will be shown in discord
+    "ShowTempStormWarnings": true
   },
 
   // text displayed when using /serverinfo
