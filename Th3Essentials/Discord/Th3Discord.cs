@@ -182,7 +182,10 @@ public class Th3Discord
             case LogSeverity.Warning:
             {
                 var logMessage = log.ToString(prependTimestamp: false);
-                if (log.Exception is GatewayReconnectException || log.Exception?.InnerException is WebSocketException)
+                if (log.Exception is GatewayReconnectException || 
+                    log.Exception is WebSocketException || 
+                    log.Exception?.InnerException is WebSocketException || 
+                    log.Exception is TaskCanceledException)
                 {
                     Sapi.Logger.VerboseDebug($"[Discord] {logMessage}");
                 }
