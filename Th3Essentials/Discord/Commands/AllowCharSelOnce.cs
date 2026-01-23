@@ -39,15 +39,20 @@ public abstract class AllowCharSelOnce
                 var option = commandInteraction.Data.Options.First();
                 if (option.Value is string playername)
                 {
-                    var player = discord.Sapi.PlayerData.GetPlayerDataByLastKnownName(playername);
-                    if (player != null)
+                    var playerData = discord.Sapi.PlayerData.GetPlayerDataByLastKnownName(playername);
+                    if (playerData != null)
                     {
-                        var playerWoldData = discord.Sapi.World.PlayerByUid(player.PlayerUID);
-                        if (playerWoldData != null && SerializerUtil.Deserialize(playerWoldData.WorldData.GetModdata("createCharacter"), false))
+                        var player = discord.Sapi.World.AllOnlinePlayers.FirstOrDefault(p => p.PlayerUID.Equals(playerData.PlayerUID));
+                        if (player != null)
                         {
-                            playerWoldData.WorldData.SetModdata("createCharacter", SerializerUtil.Serialize(false));
-                            discord.Sapi.Logger.Audit($"{guildUser.DisplayName}({guildUser.Id}) granted charsel to {playername}.");
-                            return Lang.Get("Ok, player can now run .charsel (or rejoin the world) to change skin and character class once");
+                            var allowcharselonce = player.Entity.WatchedAttributes.GetBool("allowcharselonce");
+                            if (!allowcharselonce)
+                            {
+                                player.Entity.WatchedAttributes.SetBool("allowcharselonce", true);
+                                discord.Sapi.Logger.Audit($"{guildUser.DisplayName}({guildUser.Id}) granted charsel to {playername}.");
+                                return Lang.Get("Ok, player can now run .charsel to change skin and character class once");
+                            }
+                            return "Player already has charsel permission";
                         }
 
                         return "Player is not online";
