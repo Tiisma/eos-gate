@@ -29,7 +29,7 @@ public static class Th3Util
     {
         var restartDate = new DateTime(now.Year, now.Month, now.Day, time.Hours, time.Minutes, time.Seconds);
 
-        if (now.TimeOfDay > time)
+        if (now.TimeOfDay > restartDate.TimeOfDay)
         {
             restartDate = restartDate.AddDays(1);
         }
@@ -106,90 +106,6 @@ public static class Th3Util
         }
 
         return sb.ToString();
-    }
-
-    public static string ExtractDeathMessage(IServerPlayer byPlayer, DamageSource? damageSource)
-    {
-        string msg;
-        if (damageSource != null)
-        {
-            string? key = null;
-            var numMax = 1;
-            if (damageSource.SourceEntity != null)
-            {
-                key = damageSource.SourceEntity.Code.Path.Replace("-", "");
-                if (key.Contains("wolf"))
-                {
-                    numMax = 4;
-                }
-                else if (key.Contains("pig"))
-                {
-                    numMax = 1;
-                }
-                else if (key.Contains("drifter"))
-                {
-                    numMax = 3;
-                }
-                else if (key.Contains("sheep"))
-                {
-                    if (key.Contains("female"))
-                    {
-                        key = "sheepbighornmale";
-                    }
-
-                    numMax = 3;
-                }
-                else if (key.Contains("locust"))
-                {
-                    numMax = 2;
-                }
-            }
-            else
-            {
-                if (damageSource.Source == EnumDamageSource.Explosion)
-                {
-                    key = "explosion";
-                    numMax = 4;
-                }
-                else if (damageSource.Type == EnumDamageType.Hunger)
-                {
-                    key = "hunger";
-                    numMax = 3;
-                }
-                else if (damageSource.Type == EnumDamageType.Fire)
-                {
-                    key = "fire-block";
-                    numMax = 3;
-                }
-                else if (damageSource.Source == EnumDamageSource.Fall)
-                {
-                    key = "fall";
-                    numMax = 4;
-                }
-            }
-
-            if (key != null)
-            {
-                var rnd = new Random();
-
-                msg = Lang.Get("deathmsg-" + key + "-" + rnd.Next(1, numMax), byPlayer.PlayerName);
-                if (msg.Contains("deathmsg"))
-                {
-                    var str = Lang.Get("prefixandcreature-" + key);
-                    msg = Lang.Get("th3essentials:playerdeathby", byPlayer.PlayerName, str);
-                }
-            }
-            else
-            {
-                msg = Lang.Get("th3essentials:playerdeath", byPlayer.PlayerName);
-            }
-        }
-        else
-        {
-            msg = Lang.Get("th3essentials:playerdeath", byPlayer.PlayerName);
-        }
-
-        return msg;
     }
 
     public static string PrettyTime(TimeSpan span)

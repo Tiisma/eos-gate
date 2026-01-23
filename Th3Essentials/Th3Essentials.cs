@@ -46,6 +46,10 @@ public class Th3Essentials : ModSystem
     public Th3Discord? Th3Discord { get; private set; }
 
     private long _restartListener;
+    
+    private ServerSystemEntitySimulation? _entitySimulation;
+    
+    private MethodInfo? _getDeathMessage;
 
     /// <summary>
     /// Can be used to attach logic when a player joins with a reward role
@@ -124,6 +128,13 @@ public class Th3Essentials : ModSystem
         if (Config.IsDiscordConfigured() && !deathMessages)
         {
             Sapi.Event.PlayerDeath += PlayerDeathAsync;
+            var serverMain = ((ServerMain)Sapi.World);
+            var serverSystems = typeof(ServerMain).GetField("Systems", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(serverMain) as ServerSystem[];
+            if(serverSystems?.FirstOrDefault(s => s is ServerSystemEntitySimulation) is ServerSystemEntitySimulation entitySimulation)
+            {
+                _entitySimulation = entitySimulation;
+                _getDeathMessage = typeof(ServerSystemEntitySimulation).GetMethod("GetDeathMessage", BindingFlags.Instance | BindingFlags.NonPublic);
+            }
         }
 
         if (Config.AdminRoles?.Count > 0)
@@ -161,7 +172,7 @@ public class Th3Essentials : ModSystem
             {
                 var restartDate = Th3Util.GetRestartDate(time, now);
                 var timeSpan = restartDate - now;
-                if (timeSpan.TotalSeconds < nextSeconds)
+                if (timeSpan.TotalSeconds > 0 && timeSpan.TotalSeconds < nextSeconds)
                 {
                     nextSeconds = timeSpan.TotalSeconds;
                     next = restartDate;
@@ -285,9 +296,21 @@ public class Th3Essentials : ModSystem
 
     private void PlayerDeathAsync(IServerPlayer byPlayer, DamageSource damageSource)
     {
-        var msg = Th3Util.ExtractDeathMessage(byPlayer, damageSource);
+        try
+        {
+            var client = ((ServerMain)Sapi.World).GetClient(byPlayer.ClientId);
+            if(client == null) return;
 
-        Th3Discord?.SendServerMessage(msg);
+            var msg = _getDeathMessage?.Invoke(_entitySimulation, new object[] { client, damageSource }) as string;
+            if(msg == null) return;
+
+            Th3Discord?.SendServerMessage(msg);
+        }
+        catch (Exception e)
+        {
+            Mod.Logger.Warning($"Error sending death message to discord for player {byPlayer.PlayerName} with damageSource: {damageSource?.GetCauseEntity()?.GetName()} , {damageSource?.Source}");
+            Mod.Logger.Warning(e);
+        }
     }
 
     private void GameWorldSave()
