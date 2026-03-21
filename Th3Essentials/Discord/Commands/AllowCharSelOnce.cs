@@ -3,7 +3,7 @@ using System.Linq;
 using Discord;
 using Discord.WebSocket;
 using Vintagestory.API.Config;
-using Vintagestory.API.Util;
+using Vintagestory.Server;
 
 namespace Th3Essentials.Discord.Commands;
 
@@ -42,20 +42,20 @@ public abstract class AllowCharSelOnce
                     var playerData = discord.Sapi.PlayerData.GetPlayerDataByLastKnownName(playername);
                     if (playerData != null)
                     {
-                        var player = discord.Sapi.World.AllOnlinePlayers.FirstOrDefault(p => p.PlayerUID.Equals(playerData.PlayerUID));
-                        if (player != null)
+                        var worldPlayerData = ((ServerMain)discord.Sapi.World).GetWorldPlayerData(playerData.PlayerUID);
+                        if (worldPlayerData != null)
                         {
-                            var allowcharselonce = player.Entity.WatchedAttributes.GetBool("allowcharselonce");
+                            var allowcharselonce = worldPlayerData.EntityPlayer.WatchedAttributes.GetBool("allowcharselonce");
                             if (!allowcharselonce)
                             {
-                                player.Entity.WatchedAttributes.SetBool("allowcharselonce", true);
+                                worldPlayerData.EntityPlayer.WatchedAttributes.SetBool("allowcharselonce", true);
                                 discord.Sapi.Logger.Audit($"{guildUser.DisplayName}({guildUser.Id}) granted charsel to {playername}.");
                                 return Lang.Get("Ok, player can now run .charsel to change skin and character class once");
                             }
                             return "Player already has charsel permission";
                         }
 
-                        return "Player is not online";
+                        return "Player was not online this session";
                     }
 
                     return "Could not find that player";

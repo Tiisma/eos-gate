@@ -631,7 +631,7 @@ public class Th3Discord
 
     private int UpdatePlayers(int players = 0)
     {
-        players += Sapi.Server.Players.Count(pl => pl.ConnectionState is EnumClientState.Connected or EnumClientState.Playing);
+        players += Sapi.Server.Players.Count(pl => pl.ConnectionState.IsAdmitted());
         players = Math.Max(0, players);
         _ = Client.SetGameAsync(Lang.Get("th3essentials:bot-status", players, Sapi.Server.Config.MaxClients));
         return players;

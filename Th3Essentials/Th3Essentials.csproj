@@ -1,9 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net8.0</TargetFramework>
+        <TargetFramework>net10.0</TargetFramework>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
         <OutputPath>bin\$(Configuration)\Mods\mod</OutputPath>
+        <PublishDir>bin\$(Configuration)\publish</PublishDir>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         <Nullable>enable</Nullable>
     </PropertyGroup>
@@ -11,10 +12,12 @@
     <ItemGroup>
         <Reference Include="VintagestoryAPI">
             <HintPath>$(VINTAGE_STORY_PRE)/VintagestoryAPI.dll</HintPath>
+<!--            <HintPath>/home/dilli/drive_linux/git_repos/anego/game_stable/bin/Release/VintagestoryAPI.dll</HintPath>-->
             <Private>false</Private>
         </Reference>
         <Reference Include="VintagestoryLib">
             <HintPath>$(VINTAGE_STORY_PRE)/VintagestoryLib.dll</HintPath>
+<!--            <HintPath>/home/dilli/drive_linux/git_repos/anego/game_stable/bin/Release/VintagestoryLib.dll</HintPath>-->
             <Private>False</Private>
         </Reference>
         <Reference Include="protobuf-net">
@@ -29,15 +32,14 @@
             <HintPath>$(VINTAGE_STORY_PRE)\Lib\0Harmony.dll</HintPath>
             <Private>False</Private>
         </Reference>
-    </ItemGroup>
-
-    <ItemGroup>
         <Reference Include="VSSurvivalMod">
             <HintPath>$(VINTAGE_STORY_PRE)/Mods/VSSurvivalMod.dll</HintPath>
+<!--            <HintPath>/home/dilli/drive_linux/git_repos/anego/game_stable/bin/Release/VSSurvivalMod.dll</HintPath>-->
             <Private>False</Private>
         </Reference>
         <Reference Include="VSEssentials">
             <HintPath>$(VINTAGE_STORY_PRE)/Mods/VSEssentials.dll</HintPath>
+<!--            <HintPath>/home/dilli/drive_linux/git_repos/anego/game_stable/bin/Release/VSEssentials.dll</HintPath>-->
             <Private>False</Private>
         </Reference>
     </ItemGroup>
@@ -47,9 +49,23 @@
     </ItemGroup>
 
     <ItemGroup>
-        <Content Include="..\resources\**">
+        <Content Include="modinfo.json">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
     </ItemGroup>
 
+    <ItemGroup>
+        <Content Include="modicon.png" Condition="Exists('modicon.png')">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+    </ItemGroup>
+
+    <Target Name="RemoveDuplicateNewtonsoft" AfterTargets="CopyFilesToOutputDirectory;Publish">
+        <ItemGroup>
+            <FilesToDelete Include="$(OutputPath)Newtonsoft.Json.dll" />
+            <FilesToDelete Include="$(PublishDir)Newtonsoft.Json.dll" />
+        </ItemGroup>
+        <Delete Files="@(FilesToDelete)" />
+        <Message Text="Removed duplicate Newtonsoft.Json.dll" Importance="high" />
+    </Target>
 </Project>

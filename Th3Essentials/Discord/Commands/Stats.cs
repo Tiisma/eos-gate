@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Text;
 using Discord;
 using Discord.WebSocket;
@@ -8,6 +9,7 @@ using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
 using Vintagestory.API.Config;
 using Vintagestory.API.MathTools;
+using Vintagestory.API.Server;
 using Vintagestory.Server;
 
 namespace Th3Essentials.Discord.Commands;
@@ -37,7 +39,7 @@ public abstract class Stats
         stringBuilder.Append("Version: ");
         stringBuilder.AppendLine(Th3Util.GetVsVersion());
         stringBuilder.AppendLine($"Uptime: {server.totalUpTime.Elapsed.ToString()}");
-        stringBuilder.AppendLine($"Players online: {server.Clients.Count} / {server.Config.MaxClients}");
+        stringBuilder.AppendLine($"Players online: {server.Clients.Count(c => c.Value.State.IsAdmitted())} / {server.Config.MaxClients}");
         stringBuilder.AppendLine($"Players in queue: {server.ConnectionQueue.Count} / {server.Config.MaxClientsInQueue}");
 
         var activeEntities = 0;

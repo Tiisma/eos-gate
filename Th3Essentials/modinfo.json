@@ -6,10 +6,10 @@
         "Th3Dilli"
     ],
     "description": "Th3Dilli's essentials mod",
-    "version": "2.14.0",
+    "version": "2.16.0",
     "side": "server",
     "dependencies": {
-        "game": "1.21.0",
-        "survival": "1.21.0"
+        "game": "1.22.0-pre.1",
+        "survival": "1.22.0-pre.1"
     }
 }
