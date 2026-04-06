@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.WebSockets;
+using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using Discord;
 using Discord.WebSocket;
@@ -88,6 +91,12 @@ public class Th3Discord
     public static Dictionary<string, string> AccountsToLink { get; } = new();
 
     public readonly Dictionary<string, Rewards> Rewards;
+
+    private readonly CancellationTokenSource _cancellationTokenSource = new();
+    private readonly TimeSpan _sendMessageDelay = TimeSpan.FromSeconds(1);
+    private readonly ConcurrentQueue<string> sendQueueSystem = new();
+    private readonly ConcurrentQueue<string> sendQueueAdmin = new();
+    private readonly ConcurrentQueue<string> sendQueue = new();
 
     public Th3Discord()
     {
@@ -185,9 +194,10 @@ public class Th3Discord
                 if (log.Exception is GatewayReconnectException || 
                     log.Exception is WebSocketException || 
                     log.Exception?.InnerException is WebSocketException || 
-                    log.Exception is TaskCanceledException)
+                    log.Exception is TaskCanceledException ||
+                    logMessage.Contains("Unknown Channel (MESSAGE_UPDATE Channel="))
                 {
-                    Sapi.Logger.VerboseDebug($"[Discord] {logMessage}");
+                    Sapi.Logger.Debug($"[Discord] {logMessage}");
                 }
                 else
                 {
@@ -274,6 +284,8 @@ public class Th3Discord
                     });
                 }
 
+                TyronThreadPool.QueueTask(SendMessagesTask, "Th3Essentials_send_msg");
+
                 _initialized = true;
             }
 
@@ -284,6 +296,53 @@ public class Th3Discord
             Sapi.Server.LogError($"Exception: {e.Message}");
         }
         return Task.CompletedTask;
+    }
+
+    private async Task SendMessagesTask()
+    {
+        while (!_cancellationTokenSource.Token.IsCancellationRequested)
+        {
+            await TrySendBatched(sendQueueSystem, SystemChannel);
+            await TrySendBatched(sendQueue, DiscordChannel);
+            await TrySendBatched(sendQueueAdmin, AdminLogChannel);
+            await Task.Delay(_sendMessageDelay, _cancellationTokenSource.Token);
+        }
+    }
+
+    private async Task TrySendBatched(ConcurrentQueue<string> queue, IMessageChannel? discordChannel)
+    {
+        if (discordChannel == null) return;
+        if (queue.IsEmpty) return;
+
+        var queueLocal = queue.ToArray();
+        queue.Clear();
+        if (queueLocal.Length > 1)
+        {
+            var sb = new StringBuilder();
+            foreach (var msg in queueLocal)
+            {
+                var toSend = msg;
+                if (toSend.Length > 1950)
+                {
+                    toSend = toSend.Substring(0, 1950);
+                    Sapi.Logger.Warning($"Discord message is too long. Truncating to 1950 characters. Message: {toSend}");
+                }
+
+                if (sb.Length + toSend.Length > 1950)
+                {
+                    await discordChannel.SendMessageAsync(sb.ToString());
+                    sb.Clear();
+                }
+
+                sb.AppendLine(toSend);
+            }
+
+            await discordChannel.SendMessageAsync(sb.ToString());
+        }
+        else
+        {
+            await discordChannel.SendMessageAsync(queueLocal[0]);
+        }
     }
 
     private void CreateSlashCommands()
@@ -363,7 +422,7 @@ public class Th3Discord
     /// <param name="msg"></param>
     public void SendServerMessage(string msg)
     {
-        _ = SystemChannel?.SendMessageAsync(ServerMsg(msg));
+        sendQueueSystem.Enqueue(ServerMsg(msg));
     }
 
     /// <summary>
@@ -372,7 +431,7 @@ public class Th3Discord
     /// <param name="msg"></param>
     public void SendAdminLog(string msg)
     {
-        _ = AdminLogChannel?.SendMessageAsync(msg);
+        sendQueueAdmin.Enqueue(msg);
     }
 
     private Task MessageReceivedAsync(SocketMessage messageParam)
@@ -555,7 +614,7 @@ public class Th3Discord
                     msg = $"**{byPlayer.PlayerName}:** {msg}";
                 }
             }
-            _ = DiscordChannel.SendMessageAsync(msg);
+            sendQueue.Enqueue(msg);
         }
 
         if (Th3Essentials.Config.ShowRole && (Th3Essentials.Config.ShowRoles == null || Th3Essentials.Config.ShowRoles.Contains(byPlayer.Role.Code)))
