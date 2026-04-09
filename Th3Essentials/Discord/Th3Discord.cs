@@ -302,9 +302,19 @@ public class Th3Discord
     {
         while (!_cancellationTokenSource.Token.IsCancellationRequested)
         {
-            await TrySendBatched(sendQueueSystem, SystemChannel);
-            await TrySendBatched(sendQueue, DiscordChannel);
-            await TrySendBatched(sendQueueAdmin, AdminLogChannel);
+            try
+            {
+                if (Client.ConnectionState == ConnectionState.Connected)
+                {
+                    await TrySendBatched(sendQueueSystem, SystemChannel);
+                    await TrySendBatched(sendQueue, DiscordChannel);
+                    await TrySendBatched(sendQueueAdmin, AdminLogChannel);
+                }
+            }
+            catch (Exception e)
+            {
+                Sapi.Logger.Warning($"Exception in SendMessagesTask: {e.Message}");
+            }
             await Task.Delay(_sendMessageDelay, _cancellationTokenSource.Token);
         }
     }
