@@ -361,7 +361,6 @@ Further change the config value `IsDirty:false` to `IsDirty:true` and run `/auto
   // shows the players role ingame and in discord like: [Admin] Th3Dilli: hello
   // this uses the the roles provided by the game itself see serverconfig.json -> Roles
   // each role has a Name which is used to display and a Color that the role name will be colored in
-  // it wont print roles with PrivilegeLevel less then 1
   // color names for serverconfig.json [hex color value] https://colorpicker.me/ or https://docs.microsoft.com/en-us/dotnet/api/system.drawing.color?view=net-6.0#properties
   "ShowRole": false,
   // specify what roles should show the role name before using the RoleFormat in the game chat and discord
