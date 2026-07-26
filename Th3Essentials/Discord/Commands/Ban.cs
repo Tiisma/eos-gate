@@ -143,8 +143,28 @@ public abstract class Ban
             BanPlayer(playerDataManager, guildUser.DisplayName, playerUid, targetPlayer, reason, datetime);
             discord.Sapi.Logger.Audit($"{guildUser.DisplayName}({guildUser.Id}) banned {targetPlayer} for {datetime.ToString(CultureInfo.InvariantCulture)}.");
 
+            var serverMain = (ServerMain)discord.Sapi.World;
+            serverMain.EnqueueMainThreadTask(() =>
+            {
+                try
+                {
+                    var targetClient = serverMain.GetClientByUID(playerUid);
+                    if (targetClient != null)
+                    {
+                        serverMain.DisconnectPlayer(targetClient,
+                            Lang.Get("cmdban-playerwasbanned", targetPlayer, guildUser.DisplayName, reason.Length > 0 ? ", reason: " + reason : ""),
+                            Lang.Get("cmdban-youvebeenbanned", guildUser.DisplayName, reason.Length > 0 ? ", reason: " + reason : "")
+                        );
+                    }
+                }
+                catch (Exception _)
+                {
+                    // ignored
+                }
+            });
+            
+            
             return $"{targetPlayer} is now banned until {datetime}";
-
         }
         else
         {
@@ -157,7 +177,6 @@ public abstract class Ban
             discord.Sapi.Logger.Audit($"{guildUser.DisplayName}({guildUser.Id}) unbanned {targetPlayer}.");
 
             return $"{targetPlayer} is now removed from banned players";
-
         }
     }
 
