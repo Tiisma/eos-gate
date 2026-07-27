@@ -67,6 +67,7 @@
     "hs-404": "Domov nebyl nalezen.",
     "hs-delete": "Domov {0} byl smazán.",
     "hs-empty": "Název nemůže být prázdný.",
+    "hs-bad-characters": "name may not contain < or > symbols",
     "hs-max": "Dosáhli jste maximálního počtu domovů pro tento rank.",
     "hs-exists": "Domov s tímto jménem již existuje.",
     "hs-created": "Domov jménem {0} byl vytvořen.",

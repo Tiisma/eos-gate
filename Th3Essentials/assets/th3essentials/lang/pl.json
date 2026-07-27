@@ -67,6 +67,7 @@
     "hs-404": "Nie znaleziono punktu domowego.",
     "hs-delete": "Punkt domowy {0} został usunięty.",
     "hs-empty": "Nazwa nie może być pusta.",
+    "hs-bad-characters": "name may not contain < or > symbols",
     "hs-max": "Osiągnięto maksymalną liczbę punktów domowych.",
     "hs-exists": "Punkt domowy o tej nazwie już istnieje.",
     "hs-created": "Utworzono punkt domowy o nazwie {0}",

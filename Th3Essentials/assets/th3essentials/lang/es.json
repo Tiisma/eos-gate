@@ -67,6 +67,7 @@
     "hs-404": "Punto de Destino no encontrado.",
     "hs-delete": "Se ha eliminado el Punto de Destino llamado {0}.",
     "hs-empty": "El nombre no puede estar vacío.",
+    "hs-bad-characters": "name may not contain < or > symbols",
     "hs-max": "Has alcanzado el límite de Puntos de Destino que puedes crear.",
     "hs-exists": "Ya existe un Punto de Destino con este nombre.",
     "hs-created": "Se ha creado el Punto de Destino llamado {0}.",

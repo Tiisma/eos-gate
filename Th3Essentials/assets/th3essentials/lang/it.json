@@ -67,6 +67,7 @@
     "hs-404": "Punto di ritorno non trovato.",
     "hs-delete": "Punto di ritorno {0} rimosso.",
     "hs-empty": "il nome non può essere lasciato vuoto.",
+    "hs-bad-characters": "name may not contain < or > symbols",
     "hs-max": "è stato raggiunto il numero massimo di punti di ritorno.",
     "hs-exists": "Esiste già un punto di ritorno con questo nome.",
     "hs-created": "Punto di ritorno con il nome {0} creato.",

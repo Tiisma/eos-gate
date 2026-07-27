@@ -67,6 +67,7 @@
     "hs-404": "Hazapont nem található.",
     "hs-delete": "Hazapont {0} törölve.",
     "hs-empty": "a név nem lehet üres.",
+    "hs-bad-characters": "name may not contain < or > symbols",
     "hs-max": "elérted a maximális számú hazapontot.",
     "hs-exists": "Már létezik ilyen névvel hazapont.",
     "hs-created": "Hazapont {0} névvel létrehozva.",

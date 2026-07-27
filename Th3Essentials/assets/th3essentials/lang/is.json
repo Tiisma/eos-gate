@@ -67,6 +67,7 @@
     "hs-404": "Heimareitur fannst ekki.",
     "hs-delete": "Heimareitur {0} var eytt.",
     "hs-empty": "nafn getur ekki verið autt.",
+    "hs-bad-characters": "name may not contain < or > symbols",
     "hs-max": "hámarks fjölda heimareita hefur verið náð.",
     "hs-exists": "Heimareitur með þessu nafni er nú þegar til.",
     "hs-created": "Heimareitur að nafni {0} var skapaður.",

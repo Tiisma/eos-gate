@@ -67,6 +67,7 @@
     "hs-404": "Point d'attache introuvable.",
     "hs-delete": "Point d'attache {0} a été supprimé.",
     "hs-empty": "un nom doit être défini.",
+    "hs-bad-characters": "name may not contain < or > symbols",
     "hs-max": "le nombre maximal des points d'attache a été atteint.",
     "hs-exists": "Un point d'attache avec le même nom existe déjà.",
     "hs-created": "Le point d'attache nommé {0} a été crée.",

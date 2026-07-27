@@ -67,6 +67,7 @@
     "hs-404": "Homepoint nicht gefunden.",
     "hs-delete": "Homepoint {0} gelöscht.",
     "hs-empty": "Name darf nicht leer sein.",
+    "hs-bad-characters": "name may not contain < or > symbols",
     "hs-max": "Maximale Anzahl an Homepoints erreicht.",
     "hs-exists": "Homepoint mit diesem Namen existiert bereits.",
     "hs-created": "Homepoint mit dem Namen {0} wurde erstellt.",
