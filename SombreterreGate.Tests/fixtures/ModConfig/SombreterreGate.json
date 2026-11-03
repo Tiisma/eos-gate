@@ -1,0 +1,7 @@
+{
+  "Enabled": true,
+  "HttpPrefix": "http://127.0.0.1:42499/",
+  "TicketGraceSeconds": 3,
+  "RefusalCooldownSeconds": 30,
+  "FreezeUntilAdmitted": true
+}

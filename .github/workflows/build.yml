@@ -81,6 +81,14 @@ jobs:
           VINTAGE_STORY_PRE: ${{ runner.temp }}/stratum
         run: dotnet test Tests/Tests.csproj -c Release
 
+      # Scenarios on an embedded Stratum server (Atlas): freeze, refusal, cooldown, mode restore.
+      - name: Join scenarios
+        env:
+          VINTAGE_STORY: ${{ runner.temp }}/stratum
+          VINTAGE_STORY_PRE: ${{ runner.temp }}/stratum
+          VSTEST_TESTHOST_SHUTDOWN_TIMEOUT: 30000
+        run: dotnet test SombreterreGate.Tests -c Release
+
       - uses: actions/upload-artifact@v4
         with:
           name: mods

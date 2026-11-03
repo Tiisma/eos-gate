@@ -1,21 +1,28 @@
 # Sombreterre gate
 
-This repository is a local fork of [Th3Essentials](https://gitlab.com/th3dilli_vintagestory/th3essentials) (MIT) for the Sombreterre roleplay server. The upstream remote is named `upstream`; there is no `origin` yet. Everything Th3Essentials does is kept. The fork adds a **gate** that works with the [Sombreterre launcher](../sombreterre-launcher/docs/sombreterre.md).
+This repository is a fork of [Th3Essentials](https://gitlab.com/th3dilli_vintagestory/th3essentials) (MIT) for The Exiles of Shadowland roleplay server. Everything Th3Essentials does is kept. The fork adds a **gate** that works with [The Exiles of Shadowland launcher](https://github.com/Tiisma/eos-launcher).
 
 ## What the gate does
 
 - **Discord role = whitelist.** A player may stay connected only if their Discord account is on the server's guild and holds the whitelist role. Removing the role, kicking or banning them on Discord, disconnects them if they are online.
 - **No command to type.** The player clicks "Link my Discord" once in the launcher. On each Play, the launcher fetches a single-use launch ticket and leaves it in the game folder. The `sombreterregate` client mod sends it to the server on join. The first valid ticket links the game account to that Discord account.
+- **Nothing to do before admission.** Until their ticket is accepted, a player is a spectator and their chat reaches nobody; their own game mode comes back on admission. A refused account is turned away on join for `RefusalCooldownSeconds`.
 - **Players online** on the bot's status (inherited from Th3Essentials) and on the launcher's home screen.
 - **The pack comes from the server.** The launcher's manifest is generated from the server's `Mods` folder plus `SombreterrePack/`. Server-side mods are never listed or served. Mods named in `ModDbModIds` are taken from the ModDB; every other client or universal `.zip` is served by the gate, to whitelisted launchers only.
 
-Why it is safe:
+How it is protected:
 
 - The game identity is the one the server authenticates itself; the Discord identity comes from Discord's OAuth2 flow, whose client secret never leaves the server.
-- A ticket is single use and expires after `TicketLifetimeSeconds`, so one read off the (unencrypted) game connection is worthless.
-- Links are one to one and never replaced automatically (`/gate unlink <playeruid>` is the staff's way to move one).
-- Launcher tokens are stored server side as SHA-256 digests only, and client side encrypted with the OS keyring.
-- Starting the game without the launcher gets the player disconnected after `TicketGraceSeconds`.
+- **A shared link gives nothing away.** After Discord, the browser is sent back to a one-time listener on the launcher's own loopback address with a handoff code (RFC 8252). The token is only minted for the launcher holding both that code and its verifier, so sending someone the link cannot steal their account. The bot also DMs the Discord account each time a launcher is linked to it.
+- A ticket is single use, expires after `TicketLifetimeSeconds`, and one Discord account holds one at a time, so one read off the (unencrypted) game connection is worthless and tickets cannot be stockpiled for others.
+- Links are one to one and never replaced automatically.
+- Launcher tokens are stored server side as SHA-256 digests only, client side encrypted with the OS keyring, and expire after `TokenIdleDays` without use. `/gate revoke` and `/gate unlink` revoke them.
+- Link attempts are limited per address; `/gate lockdown true` stops new links, tickets and downloads at once.
+- Launchers older than `MinLauncherVersion` are refused.
+- Every link, first join, refusal and revocation is written to the server log and, when Th3Essentials has an `AdminLogChannelId`, to that Discord channel.
+- Mods from the ModDB are pinned to the SHA-256 of the archive the server runs.
+
+What it does not protect against: whoever controls the server machine controls the mods every player installs, and the pack's SHA-256 values are computed by that same machine. Treat its security (below) as the security of every player's computer.
 
 ## Code
 
@@ -30,6 +37,7 @@ Why it is safe:
 | `Th3Essentials/Sombreterre/PackBuilder.cs` | Pack manifest from the mod folders |
 | `SombreterreGate.Client/` | Client mod that sends the ticket |
 | `Tests/SombreterreGate*.cs` | Unit tests and HTTP API tests |
+| `SombreterreGate.Tests/` | Scenarios on an embedded Stratum server (Atlas): freeze, refusal, cooldown, mode restore |
 
 ## Setting it up
 
@@ -52,6 +60,11 @@ Why it is safe:
      "PublicBaseUrl": "",
      "TicketGraceSeconds": 60,
      "TicketLifetimeSeconds": 600,
+     "FreezeUntilAdmitted": true,
+     "RefusalCooldownSeconds": 60,
+     "TokenIdleDays": 60,
+     "LinkSessionsPerAddress": 5,
+     "MinLauncherVersion": "0.1.2",
      "BypassPlayerUids": [],
      "ModDbModIds": [],
      "AdditionalPackFolders": ["SombreterrePack"],
@@ -60,7 +73,17 @@ Why it is safe:
    ```
 
    Keep this file private: it holds the OAuth client secret.
-6. Start the server. The log says `Launcher API listening on ...`. After changing mods, run `/gate reloadpack`.
+6. In `Th3Config.json`, set `DiscordConfig.AdminLogChannelId` to a staff-only channel: the gate's audit trail goes there.
+7. Start the server. The log says `Launcher API listening on ...`.
+
+### Staff commands (`controlserver` privilege)
+
+| Command | Effect |
+| --- | --- |
+| `/gate reloadpack` | Rebuild the pack after changing mods |
+| `/gate unlink <playeruid>` | Remove a game account's Discord link and revoke that Discord account's launcher tokens |
+| `/gate revoke <discord user id>` | Revoke every launcher token of a Discord account; the player links again |
+| `/gate lockdown true` / `false` | Stop or resume new links, tickets and pack downloads; players already in stay |
 
 On Stratum, `ClientModPolicy` in `Data/stratum.json` decides which client-side mods a player may load. When it is enabled, it silently disables `sombreterregate` on the player's side, the ticket is never sent, and the player is refused after `TicketGraceSeconds` (their `client-main.log` then says `Server sends me channel name sombreterregate, but no client side mod registered it`). Keep the policy if you want it, and allow the gate's client mod, along with any other client-only mod of the pack:
 
@@ -98,6 +121,13 @@ The Early Access server uses [Caddy](https://caddyserver.com) on Windows, with t
    		# HttpListener only answers requests addressed to its own prefix.
    		header_up Host 127.0.0.1:42421
    	}
+   	log {
+   		output file C:\caddy\logs\eos-gate.log {
+   			roll_size 10MiB
+   			roll_keep 10
+   		}
+   		format json
+   	}
    }
    ```
 
@@ -119,20 +149,38 @@ The Early Access server uses [Caddy](https://caddyserver.com) on Windows, with t
 
 5. In `SombreterreGate.json`, set `"PublicBaseUrl": "https://eos-gate.duckdns.org:8443/"`, and add `https://eos-gate.duckdns.org:8443/api/link/callback` to the Discord application's OAuth2 redirects.
 
+## Securing the server machine
+
+The gate is only as safe as the machine it runs on. On the Early Access host:
+
+- **Secrets**: `ModConfig/Th3Config.json` (bot token), `ModConfig/SombreterreGate.json` (OAuth secret), `ModData/SombreterreGate-data.json` (links) and `C:\caddy\Caddyfile` (DuckDNS token) should be readable only by the account that runs the server and Caddy, and by administrators:
+
+  ```powershell
+  icacls "<file>" /inheritance:r /grant:r "Administrators:F" "SYSTEM:F" "<server account>:R"
+  ```
+
+  If a secret leaks: reset it (Discord bot token, OAuth client secret, DuckDNS token), restart, then `/gate revoke` the accounts involved.
+- **Remote access**: RDP not exposed to the internet (VPN, or the host's allow-list of addresses), Windows and Apache patched. The firewall only opens 42420 (game) and 8443 (gate) for this project.
+- **Accounts**: 2FA on the Discord application owner, every Discord administrator and moderator, GitHub and DuckDNS. Know who can give the whitelist role (*Manage Roles*, other bots) and who is in Th3Essentials' `ModerationRoles`: those slash commands can shut the server down or change whitelists. Keep a trusted second owner so the project does not rest on one person.
+- **Backups** off the machine, with a restore actually tested.
+
 ## Building and testing
 
 ```bash
-export VINTAGE_STORY_PRE="C:/Users/march/Documents/VintageStory/VSLauncher/VSLGameVersions/1.22.7"
+export VINTAGE_STORY_PRE="C:/Users/march/Documents/VintageStory/EoS-Server-Test/server"   # a Stratum server folder
+export VINTAGE_STORY="$VINTAGE_STORY_PRE"
 ./build.sh                                   # Releases/th3essentials_<version>.zip
 dotnet build SombreterreGate.Client -c Release
 dotnet test Tests/Tests.csproj --filter "FullyQualifiedName~Sombreterre"
+dotnet test SombreterreGate.Tests            # embedded server scenarios
 ```
 
 `Releases/` holds the packages and is git-ignored. Zip `SombreterreGate.Client/bin/Release/Mods/sombreterregate/` (its `.dll` and `modinfo.json`) for the client mod.
 
-## Not verified yet
+## What has been verified
 
-- Checked on a local Stratum `v1.22.7-stratum.2` dedicated server: the mod builds against its DLLs and loads, the API listens, `/api/status` answers, a token is required for tickets and the pack, and without the bot connected tickets and the pack are refused (`discord-unavailable`). No game client has joined it yet.
-- The join timing (ticket sent on the client's `LevelFinalize`, checked against `PlayerNowPlaying` plus the grace delay) is reasoned from the API, not observed.
-- The Discord OAuth exchange and the role events have only been tested with a fake backend, not against Discord.
+- With real players on the Early Access Stratum server: Discord linking, the pack, tickets, automatic linking of the game account and admission.
+- On an embedded Stratum server (Atlas): freeze in spectator mode, chat swallowed, refusal after the grace period, cooldown on retry, own mode restored.
+- Unit and HTTP tests: the loopback handoff (a shared link yields nothing), revocation, token expiry, one ticket per account, rate limits, lockdown, outdated launchers.
+- Not yet observed with a real client: the freeze and its release on admission, the DM on linking, the admin channel audit, the role-loss kick.
 - Th3Essentials' own date tests (`Tests/UnitTest1.cs`) fail on a machine with a non-US locale; that predates the fork.
