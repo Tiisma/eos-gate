@@ -4,7 +4,7 @@
     "name": "Sombreterre Gate (client)",
     "authors": ["Sombreterre"],
     "description": "Hands the launch ticket of the Sombreterre launcher to the server on join.",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "side": "Client",
     "requiredOnClient": false,
     "requiredOnServer": false,

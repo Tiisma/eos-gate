@@ -32,11 +32,15 @@ public class GateConfig
     /// </summary>
     public string PublicBaseUrl = "";
 
-    /// <summary>How long a player may stay connected without presenting a valid ticket.</summary>
-    public int TicketGraceSeconds = 20;
+    /// <summary>
+    /// How long a player may stay connected without presenting a valid ticket, counted from the moment
+    /// the server sees them playing. A heavily modded world can take the client a while to finish
+    /// loading, and the client mod only sends once its connection is ready.
+    /// </summary>
+    public int TicketGraceSeconds = 60;
 
     /// <summary>How long a launch ticket stays valid after the launcher asked for it.</summary>
-    public int TicketLifetimeSeconds = 180;
+    public int TicketLifetimeSeconds = 600;
 
     /// <summary>Player UIDs never gated (staff accounts, test accounts).</summary>
     public List<string> BypassPlayerUids = new();

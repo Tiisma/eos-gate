@@ -149,10 +149,11 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
         if (outcome == GateOutcome.Admitted)
         {
             _admitted[player.PlayerUID] = true;
+            _sapi.Logger.Notification($"[SombreterreGate] Ticket accepted for {player.PlayerName}.");
             return;
         }
 
-        _sapi.Logger.Notification($"[SombreterreGate] Refused a player: {outcome}.");
+        _sapi.Logger.Notification($"[SombreterreGate] Refused {player.PlayerName}: {outcome}.");
         player.Disconnect(RefusalMessage(outcome));
     }
 
@@ -160,13 +161,14 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
     {
         if (Bypassed(player) || _admitted.ContainsKey(player.PlayerUID)) return;
 
-        // The ticket can still be on its way: the client sends it once its level is ready.
+        // The ticket can still be on its way: the client sends it once its connection is ready.
+        _sapi.Logger.Notification($"[SombreterreGate] Waiting up to {_config.TicketGraceSeconds}s for {player.PlayerName}'s launch ticket.");
         _sapi.Event.RegisterCallback(_ =>
         {
             if (_admitted.ContainsKey(player.PlayerUID)) return;
             if (player.ConnectionState is EnumClientState.Connected or EnumClientState.Playing)
             {
-                _sapi.Logger.Notification("[SombreterreGate] Refused a player: no ticket.");
+                _sapi.Logger.Notification($"[SombreterreGate] Refused {player.PlayerName}: no ticket received within {_config.TicketGraceSeconds}s. Their client-main.log says why (lines starting with [SombreterreGate]).");
                 player.Disconnect(Lang.Get("th3essentials:gate-kick-no-ticket"));
             }
         }, _config.TicketGraceSeconds * 1000);
