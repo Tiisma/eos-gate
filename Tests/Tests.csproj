@@ -30,7 +30,8 @@
     <ItemGroup>
         <Reference Include="VintagestoryAPI">
             <HintPath>$(VINTAGE_STORY_PRE)/VintagestoryAPI.dll</HintPath>
-            <Private>False</Private>
+            <!-- Copied next to the tests: nothing else provides it at test time. -->
+            <Private>True</Private>
         </Reference>
     </ItemGroup>
 

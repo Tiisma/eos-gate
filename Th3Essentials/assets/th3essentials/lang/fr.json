@@ -142,5 +142,12 @@
     "wp-exists": "Warp \"{0}\" already exists!",
     "wp-item-set": "Warp Item set",
     "wp-item-unset": "Warp Item unset",
-    "bot-status": "players: {0}/{1}"
+    "bot-status": "joueurs : {0}/{1}",
+    "gate-kick-no-ticket": "Lance le jeu depuis le launcher The Exiles of Shadowland pour rejoindre ce serveur.",
+    "gate-kick-player-linked": "Ce compte de jeu est déjà lié à un autre compte Discord. Contacte l'équipe.",
+    "gate-kick-discord-linked": "Ton compte Discord est déjà lié à un autre compte de jeu. Contacte l'équipe.",
+    "gate-kick-not-member": "Rejoins le serveur Discord de The Exiles of Shadowland pour jouer.",
+    "gate-kick-not-whitelisted": "Ta whitelist n'a pas encore été validée. Consulte le Discord de The Exiles of Shadowland.",
+    "gate-kick-discord-unavailable": "Le serveur n'arrive pas à joindre Discord pour le moment. Réessaie dans un instant.",
+    "gate-kick-role-lost": "Ton rôle whitelist a été retiré sur Discord."
 }

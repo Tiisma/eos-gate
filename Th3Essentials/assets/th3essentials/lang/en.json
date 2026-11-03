@@ -142,5 +142,12 @@
     "wp-exists": "Warp \"{0}\" already exists!",
     "wp-item-set": "Warp Item set",
     "wp-item-unset": "Warp Item unset",
-    "bot-status": "players: {0}/{1}"
+    "bot-status": "players: {0}/{1}",
+    "gate-kick-no-ticket": "Start the game from The Exiles of Shadowland launcher to join this server.",
+    "gate-kick-player-linked": "This game account is already linked to another Discord account. Contact the staff.",
+    "gate-kick-discord-linked": "Your Discord account is already linked to another game account. Contact the staff.",
+    "gate-kick-not-member": "Join The Exiles of Shadowland Discord server to play.",
+    "gate-kick-not-whitelisted": "Your whitelist has not been validated yet. Check The Exiles of Shadowland Discord.",
+    "gate-kick-discord-unavailable": "The server cannot reach Discord right now. Try again in a moment.",
+    "gate-kick-role-lost": "Your whitelist role was removed on Discord."
 }

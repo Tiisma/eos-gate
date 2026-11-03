@@ -90,6 +90,9 @@ public class Th3Discord
 
     public static Dictionary<string, string> AccountsToLink { get; } = new();
 
+    /// <summary>Set by the Sombreterre gate before startup: it reads guild members and their roles.</summary>
+    public static bool GateRequiresMembers { get; set; }
+
     public readonly Dictionary<string, Rewards> Rewards;
 
     private readonly CancellationTokenSource _cancellationTokenSource = new();
@@ -117,7 +120,7 @@ public class Th3Discord
             GatewayIntents = GatewayIntents.Guilds | GatewayIntents.GuildIntegrations | GatewayIntents.GuildMessages | GatewayIntents.MessageContent
         };
 
-        if (Config.Rewards)
+        if (Config.Rewards || GateRequiresMembers)
         {
             config.GatewayIntents |= GatewayIntents.GuildMembers;
             config.AlwaysDownloadUsers = true;
