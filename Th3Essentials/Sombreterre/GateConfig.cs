@@ -42,6 +42,27 @@ public class GateConfig
     /// <summary>How long a launch ticket stays valid after the launcher asked for it.</summary>
     public int TicketLifetimeSeconds = 600;
 
+    /// <summary>
+    /// Put players in spectator mode until their ticket is accepted, and swallow their chat, so the
+    /// grace period above cannot be used to play or grief. Their own game mode comes back on admission.
+    /// </summary>
+    public bool FreezeUntilAdmitted = true;
+
+    /// <summary>After a refusal, how long the same game account is turned away straight on join.</summary>
+    public int RefusalCooldownSeconds = 60;
+
+    /// <summary>A launcher token unused for this many days stops working; the player links again.</summary>
+    public int TokenIdleDays = 60;
+
+    /// <summary>Discord link attempts one address may start per ten minutes.</summary>
+    public int LinkSessionsPerAddress = 5;
+
+    /// <summary>
+    /// Oldest launcher version allowed to link, fetch the pack or get a ticket ("0.1.2"). Empty
+    /// means no check. Launchers too old to say their version count as 0.0.0.
+    /// </summary>
+    public string MinLauncherVersion = "";
+
     /// <summary>Player UIDs never gated (staff accounts, test accounts).</summary>
     public List<string> BypassPlayerUids = new();
 

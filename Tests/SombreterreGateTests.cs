@@ -76,15 +76,66 @@ public class SombreterreGateTests
 
             Assert.DoesNotContain(token, File.ReadAllText(path));
             var reloaded = new GateStore(path);
-            Assert.Equal(Alice, reloaded.FindToken(token)?.DiscordId);
+            Assert.Equal(Alice, reloaded.FindToken(token, Now, TimeSpan.FromDays(60))?.DiscordId);
             Assert.Equal("uid-alice", reloaded.PlayerOf(Alice));
             Assert.True(reloaded.RevokeToken(token));
-            Assert.Null(new GateStore(path).FindToken(token));
+            Assert.Null(new GateStore(path).FindToken(token, Now, TimeSpan.FromDays(60)));
         }
         finally
         {
             File.Delete(path);
         }
+    }
+
+    [Fact]
+    public void IdleTokensExpireAndRevokeAllClearsAnAccount()
+    {
+        var store = new GateStore(null);
+        var idle = TimeSpan.FromDays(60);
+        var old = store.IssueToken(Alice, "alice", Now);
+        var other = store.IssueToken(Alice, "alice", Now);
+        var bob = store.IssueToken(Bob, "bob", Now);
+
+        Assert.NotNull(store.FindToken(old, Now.AddDays(59), idle));
+        Assert.NotNull(store.FindToken(old, Now.AddDays(100), idle)); // used on day 59, so still fresh
+        Assert.Null(store.FindToken(bob, Now.AddDays(61), idle));
+        Assert.Null(store.FindToken(bob, Now, idle)); // dropped for good
+
+        Assert.Equal(2, store.RevokeAllFor(Alice));
+        Assert.Null(store.FindToken(other, Now, idle));
+    }
+
+    [Fact]
+    public void OneDiscordAccountHoldsOneTicketAtATime()
+    {
+        var book = new TicketBook();
+        var first = book.Issue(Alice, Now, TimeSpan.FromMinutes(10));
+        var second = book.Issue(Alice, Now, TimeSpan.FromMinutes(10));
+        var bob = book.Issue(Bob, Now, TimeSpan.FromMinutes(10));
+
+        Assert.Null(book.Consume(first, Now));
+        Assert.Equal(Alice, book.Consume(second, Now));
+        Assert.Equal(Bob, book.Consume(bob, Now));
+    }
+
+    [Theory]
+    [InlineData("0.1.2", "0.1.2")]
+    [InlineData("1.0.0-beta.3", "1.0.0")]
+    [InlineData("0.1", null)]
+    [InlineData("nope", null)]
+    [InlineData("", null)]
+    public void LauncherVersionsParseAsThreePartVersions(string value, string? expected)
+    {
+        Assert.Equal(expected, GateHttpApi.ParseVersion(value)?.ToString());
+    }
+
+    [Fact]
+    public void UnlinkReportsTheDiscordAccountItFreed()
+    {
+        var store = new GateStore(null);
+        store.Link("uid-alice", Alice);
+        Assert.Equal(Alice, store.Unlink("uid-alice"));
+        Assert.Null(store.Unlink("uid-alice"));
     }
 
     [Fact]
@@ -103,7 +154,9 @@ public class SombreterreGateTests
             var mods = (JArray)JObject.Parse(pack.ManifestJson)["mods"]!;
 
             Assert.Equal(2, mods.Count);
-            Assert.Contains(mods, m => (string?)m["modid"] == "carryon" && (string?)m["source"] == "moddb");
+            var carryon = mods.Single(m => (string?)m["modid"] == "carryon");
+            Assert.Equal("moddb", (string?)carryon["source"]);
+            Assert.Equal(64, ((string?)carryon["sha256"])?.Length);
             var core = mods.Single(m => (string?)m["modid"] == "sombreterrecore");
             Assert.Equal("private", (string?)core["source"]);
             Assert.Equal(64, ((string?)core["sha256"])?.Length);

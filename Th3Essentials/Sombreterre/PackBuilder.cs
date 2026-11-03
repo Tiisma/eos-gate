@@ -77,7 +77,8 @@ public class PackBuilder
 
                 if (moddb.Contains(modid))
                 {
-                    entries.Add(new { source = "moddb", modid, version });
+                    // Pinned to the archive the server runs, so a ModDB file that changed under the same version is refused.
+                    entries.Add(new { source = "moddb", modid, version, sha256 = Sha256(path) });
                     continue;
                 }
 

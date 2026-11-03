@@ -15,12 +15,17 @@ public class TicketBook
     private readonly Dictionary<string, (ulong DiscordId, DateTime ExpiresUtc)> _tickets = new();
     private readonly object _lock = new();
 
+    /// <summary>
+    /// Issues a ticket. One Discord account holds at most one: a new one cancels the previous, so a
+    /// whitelisted account cannot stockpile tickets to hand to other players.
+    /// </summary>
     public string Issue(ulong discordId, DateTime nowUtc, TimeSpan lifetime)
     {
         var ticket = GateStore.RandomToken();
         lock (_lock)
         {
             Prune(nowUtc);
+            foreach (var key in _tickets.Where(t => t.Value.DiscordId == discordId).Select(t => t.Key).ToList()) _tickets.Remove(key);
             _tickets[ticket] = (discordId, nowUtc + lifetime);
         }
         return ticket;

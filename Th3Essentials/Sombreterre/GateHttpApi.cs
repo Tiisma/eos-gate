@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,19 +16,25 @@ namespace Th3Essentials.Sombreterre;
 /// The launcher's side of the gate, over HTTP:
 ///
 ///   GET  /api/status                 players online, public
-///   POST /api/link/session           {verifierHash} -> {session, url}: starts a Discord link
+///   POST /api/link/session           {verifierHash, loopbackPort} -> {session, url}: starts a Discord link
 ///   GET  /api/link/start?session=    redirects the browser to Discord
-///   GET  /api/link/callback          Discord comes back here; issues the launcher token
-///   POST /api/link/poll              {session, verifier} -> {status, token?, name?}
+///   GET  /api/link/callback          Discord comes back here; the browser is sent on to the launcher
+///   POST /api/link/poll              {session, verifier, handoff} -> {status, token?, name?}
 ///   GET  /api/me                     (token) Discord account, membership, whitelist
 ///   POST /api/ticket                 (token, whitelisted) -> {ticket, expiresIn}
 ///   POST /api/logout                 (token) revokes it
 ///   GET  /api/pack.json              (token, whitelisted) the pack manifest
 ///   GET  /api/{file}.zip             (token, whitelisted) one private mod of that manifest
 ///
-/// The launch flow never handles a Discord password or the OAuth client secret. The link session is
-/// bound to the launcher that started it by a verifier only that launcher knows (PKCE style), so the
-/// token goes nowhere else even if the browser link is shared.
+/// The launch flow never handles a Discord password or the OAuth client secret.
+///
+/// Who gets the token: the launcher that started the session proves it twice. It holds a verifier
+/// only it knows (PKCE style), and once Discord has sent the player back, this API redirects the
+/// browser to a one-time listener on the launcher's own loopback address with a handoff code
+/// (RFC 8252). Both are required to collect the token. A link sent to someone else therefore cannot
+/// hand their Discord account to the sender: the victim's browser goes back to the victim's own
+/// computer, where the sender's launcher is not listening. The token is only minted at that point,
+/// so an abandoned or failed session never leaves a token behind.
 /// </summary>
 public class GateHttpApi : IDisposable
 {
@@ -37,28 +44,57 @@ public class GateHttpApi : IDisposable
         (int Online, int Max) Status();
         PackBuilder.Result Pack();
         void Log(string message);
+
+        /// <summary>Records a security-relevant event: server log and, when configured, the Discord admin channel.</summary>
+        void Audit(string message);
+
+        /// <summary>Tells a Discord account that a launcher was just linked to it, so a link they did not make is noticed.</summary>
+        void NotifyLinked(ulong discordId);
+
+        /// <summary>True while staff has locked the gate: no new links, tickets or downloads.</summary>
+        bool LockedDown { get; }
+    }
+
+    private enum SessionState
+    {
+        Pending,
+        InProgress,
+        Authorized,
+        Failed
     }
 
     private class LinkSession
     {
         public string VerifierHash = "";
+        public int LoopbackPort;
         public DateTime CreatedUtc;
-        public string? Token;
+        public SessionState State = SessionState.Pending;
+        public ulong DiscordId;
         public string Name = "";
-        public bool Failed;
+        public string Handoff = "";
+        public string Address = "";
     }
 
+    public const string LauncherVersionHeader = "X-EoS-Launcher-Version";
+
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan AddressWindow = TimeSpan.FromMinutes(10);
     private const int MaxBodyBytes = 4096;
+    private const int MaxSessions = 500;
 
     private readonly GateConfig _config;
     private readonly GateStore _store;
     private readonly TicketBook _tickets;
     private readonly IBackend _backend;
     private readonly DiscordOAuth? _oauth;
+    private readonly Version? _minLauncherVersion;
     private readonly Dictionary<string, LinkSession> _sessions = new();
+    private readonly Dictionary<string, List<DateTime>> _sessionsByAddress = new();
     private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _stop = new();
+
+    /// <summary>Tests only: stands in for the Discord code exchange.</summary>
+    internal Func<string, Task<(ulong Id, string Name)?>>? ExchangeOverride { get; set; }
 
     public GateHttpApi(GateConfig config, GateStore store, TicketBook tickets, IBackend backend)
     {
@@ -68,6 +104,7 @@ public class GateHttpApi : IDisposable
         _backend = backend;
         if (!string.IsNullOrEmpty(config.OAuthClientId) && !string.IsNullOrEmpty(config.OAuthClientSecret))
             _oauth = new DiscordOAuth(config.OAuthClientId, config.OAuthClientSecret, config.PublicBase() + "api/link/callback");
+        _minLauncherVersion = ParseVersion(config.MinLauncherVersion);
         _listener.Prefixes.Add(config.HttpPrefix);
     }
 
@@ -131,22 +168,36 @@ public class GateHttpApi : IDisposable
         var path = request.Url?.AbsolutePath ?? "/";
         var method = request.HttpMethod;
 
+        if (method == "GET" && path == "/api/status")
+        {
+            var (online, max) = _backend.Status();
+            Json(response, 200, new { online, max });
+            return;
+        }
+
+        if (method == "GET" && path == "/api/link/callback")
+        {
+            // The browser coming back from Discord carries no launcher header; it is checked at poll.
+            await Callback(request, response);
+            return;
+        }
+
+        if (method == "GET" && path == "/api/link/start")
+        {
+            StartSession(request, response);
+            return;
+        }
+
+        if (!LauncherIsRecentEnough(request))
+        {
+            Json(response, 426, new { error = "launcher-outdated", minVersion = _config.MinLauncherVersion });
+            return;
+        }
+
         switch (method, path)
         {
-            case ("GET", "/api/status"):
-            {
-                var (online, max) = _backend.Status();
-                Json(response, 200, new { online, max });
-                return;
-            }
             case ("POST", "/api/link/session"):
                 await CreateSession(request, response);
-                return;
-            case ("GET", "/api/link/start"):
-                StartSession(request, response);
-                return;
-            case ("GET", "/api/link/callback"):
-                await Callback(request, response);
                 return;
             case ("POST", "/api/link/poll"):
                 await Poll(request, response);
@@ -155,7 +206,7 @@ public class GateHttpApi : IDisposable
 
         // Everything below needs a launcher token.
         var token = BearerToken(request);
-        var record = token == null ? null : _store.FindToken(token);
+        var record = token == null ? null : _store.FindToken(token, DateTime.UtcNow, TimeSpan.FromDays(Math.Max(1, _config.TokenIdleDays)));
         if (token == null || record == null)
         {
             Json(response, 401, new { error = "unauthorized" });
@@ -170,8 +221,15 @@ public class GateHttpApi : IDisposable
                 return;
             case ("POST", "/api/logout"):
                 _store.RevokeToken(token);
+                _backend.Audit($"Launcher token revoked by its owner (Discord {record.DiscordId}).");
                 Json(response, 200, new { ok = true });
                 return;
+        }
+
+        if (_backend.LockedDown)
+        {
+            Json(response, 423, new { error = "locked-down" });
+            return;
         }
 
         if (membership != MembershipStatus.Whitelisted)
@@ -219,24 +277,35 @@ public class GateHttpApi : IDisposable
             Json(response, 503, new { error = "oauth-not-configured" });
             return;
         }
+        if (_backend.LockedDown)
+        {
+            Json(response, 423, new { error = "locked-down" });
+            return;
+        }
+
         var body = await ReadBody(request);
         var verifierHash = body?["verifierHash"]?.ToString();
-        if (verifierHash == null || verifierHash.Length != 64 || !verifierHash.All(Uri.IsHexDigit))
+        var port = body?["loopbackPort"]?.Type == JTokenType.Integer ? (int)body["loopbackPort"]! : 0;
+        if (verifierHash == null || verifierHash.Length != 64 || !verifierHash.All(Uri.IsHexDigit) || port is < 1024 or > 65535)
         {
             Json(response, 400, new { error = "bad-request" });
             return;
         }
 
+        var address = ClientAddress(request);
+        var now = DateTime.UtcNow;
         var id = GateStore.RandomToken();
         lock (_sessions)
         {
-            Prune();
-            if (_sessions.Count > 500)
+            Prune(now);
+            var recent = _sessionsByAddress.TryGetValue(address, out var times) ? times : _sessionsByAddress[address] = new List<DateTime>();
+            if (_sessions.Count >= MaxSessions || recent.Count >= Math.Max(1, _config.LinkSessionsPerAddress))
             {
                 Json(response, 429, new { error = "busy" });
                 return;
             }
-            _sessions[id] = new LinkSession { VerifierHash = verifierHash.ToLowerInvariant(), CreatedUtc = DateTime.UtcNow };
+            recent.Add(now);
+            _sessions[id] = new LinkSession { VerifierHash = verifierHash.ToLowerInvariant(), LoopbackPort = port, CreatedUtc = now, Address = address };
         }
         Json(response, 200, new { session = id, url = _config.PublicBase() + "api/link/start?session=" + Uri.EscapeDataString(id) });
     }
@@ -247,7 +316,7 @@ public class GateHttpApi : IDisposable
         bool known;
         lock (_sessions)
         {
-            known = id != null && _sessions.ContainsKey(id);
+            known = id != null && _sessions.TryGetValue(id, out var session) && session.State == SessionState.Pending;
         }
         if (!known || _oauth == null)
         {
@@ -262,10 +331,15 @@ public class GateHttpApi : IDisposable
     {
         var id = request.QueryString["state"];
         var code = request.QueryString["code"];
-        LinkSession? session;
+        LinkSession? session = null;
         lock (_sessions)
         {
-            session = id != null && _sessions.TryGetValue(id, out var found) && found.Token == null && !found.Failed ? found : null;
+            // Claimed under the lock, so a second callback for the same session finds it busy.
+            if (id != null && _sessions.TryGetValue(id, out var found) && found.State == SessionState.Pending)
+            {
+                found.State = SessionState.InProgress;
+                session = found;
+            }
         }
         if (session == null || _oauth == null)
         {
@@ -273,23 +347,27 @@ public class GateHttpApi : IDisposable
             return;
         }
 
-        // Discord sends the player back with ?error=access_denied when they press Cancel.
         if (code == null) _backend.Log($"Discord link cancelled: {request.QueryString["error"] ?? "no code"}");
-        var user = code == null ? null : await _oauth.ExchangeAsync(code, _backend.Log);
+        var user = code == null ? null : ExchangeOverride != null ? await ExchangeOverride(code) : await _oauth.ExchangeAsync(code, _backend.Log);
         if (user == null)
         {
-            lock (_sessions) session.Failed = true;
+            lock (_sessions) session.State = SessionState.Failed;
             Html(response, 400, "Liaison annulée", "Discord n'a pas confirmé la connexion. Tu peux fermer cet onglet et réessayer depuis le launcher.");
             return;
         }
 
-        var token = _store.IssueToken(user.Value.Id, user.Value.Name, DateTime.UtcNow);
+        string handoff;
         lock (_sessions)
         {
-            session.Token = token;
+            session.DiscordId = user.Value.Id;
             session.Name = user.Value.Name;
+            session.Handoff = handoff = GateStore.RandomToken();
+            session.State = SessionState.Authorized;
         }
-        Html(response, 200, "Compte Discord lié", "C'est fait ! Tu peux fermer cet onglet et retourner dans le launcher.");
+
+        // Only the launcher listening on this computer's loopback learns the handoff code.
+        response.StatusCode = 302;
+        response.RedirectLocation = $"http://127.0.0.1:{session.LoopbackPort}/eos-link?handoff={Uri.EscapeDataString(handoff)}";
     }
 
     private async Task Poll(HttpListenerRequest request, HttpListenerResponse response)
@@ -297,6 +375,7 @@ public class GateHttpApi : IDisposable
         var body = await ReadBody(request);
         var id = body?["session"]?.ToString();
         var verifier = body?["verifier"]?.ToString();
+        var handoff = body?["handoff"]?.ToString();
         if (id == null || verifier == null)
         {
             Json(response, 400, new { error = "bad-request" });
@@ -304,24 +383,84 @@ public class GateHttpApi : IDisposable
         }
 
         LinkSession? session;
+        bool collected = false;
         lock (_sessions)
         {
-            Prune();
-            session = _sessions.TryGetValue(id, out var found) && found.VerifierHash == GateStore.Hash(verifier) ? found : null;
-            // Handed over once: the session goes as soon as its token does.
-            if (session?.Token != null || session?.Failed == true) _sessions.Remove(id);
+            Prune(DateTime.UtcNow);
+            session = _sessions.TryGetValue(id, out var found) && FixedEquals(found.VerifierHash, GateStore.Hash(verifier)) ? found : null;
+            if (session?.State == SessionState.Failed) _sessions.Remove(id);
+            if (session?.State == SessionState.Authorized && handoff != null && FixedEquals(session.Handoff, handoff))
+            {
+                _sessions.Remove(id);
+                collected = true;
+            }
         }
 
-        if (session == null) Json(response, 404, new { status = "expired" });
-        else if (session.Failed) Json(response, 200, new { status = "failed" });
-        else if (session.Token == null) Json(response, 200, new { status = "pending" });
-        else Json(response, 200, new { status = "linked", token = session.Token, discordName = session.Name });
+        if (session == null)
+        {
+            Json(response, 404, new { status = "expired" });
+            return;
+        }
+        if (session.State == SessionState.Failed)
+        {
+            Json(response, 200, new { status = "failed" });
+            return;
+        }
+        if (!collected)
+        {
+            Json(response, 200, new { status = "pending" });
+            return;
+        }
+
+        var token = _store.IssueToken(session.DiscordId, session.Name, DateTime.UtcNow);
+        _backend.Audit($"Launcher linked to Discord {session.DiscordId} ({session.Name}) from {session.Address}.");
+        _backend.NotifyLinked(session.DiscordId);
+        Json(response, 200, new { status = "linked", token, discordName = session.Name });
     }
 
-    private void Prune()
+    private void Prune(DateTime now)
     {
-        var now = DateTime.UtcNow;
         foreach (var key in _sessions.Where(s => now - s.Value.CreatedUtc > SessionLifetime).Select(s => s.Key).ToList()) _sessions.Remove(key);
+        foreach (var (address, times) in _sessionsByAddress.ToList())
+        {
+            times.RemoveAll(t => now - t > AddressWindow);
+            if (times.Count == 0) _sessionsByAddress.Remove(address);
+        }
+    }
+
+    private bool LauncherIsRecentEnough(HttpListenerRequest request)
+    {
+        if (_minLauncherVersion == null) return true;
+        var sent = ParseVersion(request.Headers[LauncherVersionHeader]) ?? new Version(0, 0, 0);
+        return sent >= _minLauncherVersion;
+    }
+
+    /// <summary>"1.2.3" or "1.2.3-beta.1" as 1.2.3; anything else as null.</summary>
+    public static Version? ParseVersion(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var core = value.Trim().Split('-', '+')[0];
+        return Version.TryParse(core, out var version) && core.Count(c => c == '.') == 2 ? version : null;
+    }
+
+    /// <summary>
+    /// The address a request came from. Behind the reverse proxy on this machine, that is the last
+    /// entry the proxy put in X-Forwarded-For; a request that did not come through loopback is taken
+    /// at its socket address, so a forged header from outside counts for nothing.
+    /// </summary>
+    private static string ClientAddress(HttpListenerRequest request)
+    {
+        var remote = request.RemoteEndPoint?.Address;
+        if (remote == null) return "unknown";
+        if (!IPAddress.IsLoopback(remote)) return remote.ToString();
+        var forwarded = request.Headers["X-Forwarded-For"];
+        var last = forwarded?.Split(',').Select(part => part.Trim()).LastOrDefault(part => part.Length > 0);
+        return last != null && IPAddress.TryParse(last, out var parsed) ? parsed.ToString() : remote.ToString();
+    }
+
+    private static bool FixedEquals(string a, string b)
+    {
+        return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));
     }
 
     public static string MembershipName(MembershipStatus status) => status switch
@@ -375,6 +514,8 @@ public class GateHttpApi : IDisposable
         response.StatusCode = status;
         response.ContentType = contentType;
         response.Headers["Cache-Control"] = "no-store";
+        response.Headers["X-Content-Type-Options"] = "nosniff";
+        response.Headers["Referrer-Policy"] = "no-referrer";
         response.ContentLength64 = bytes.Length;
         response.OutputStream.Write(bytes, 0, bytes.Length);
     }

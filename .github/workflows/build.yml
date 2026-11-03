@@ -21,6 +21,10 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only unless a job says otherwise: only the release job, on a version tag, may write.
+permissions:
+  contents: read
+
 env:
   STRATUM_TAG: v1.22.7-stratum.2
   STRATUM_ASSET: stratum-1.22.7-stratum.2-linux-x64.zip
@@ -30,8 +34,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,10 +87,23 @@ jobs:
           path: Releases/*.zip
           retention-days: 14
 
-      - name: Draft a release for a version tag
-        if: startsWith(github.ref, 'refs/tags/v')
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mods
+          path: Releases
+
+      - name: Draft a release for the version tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No checkout in this job, so gh is told which repository to release in.
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           cd Releases

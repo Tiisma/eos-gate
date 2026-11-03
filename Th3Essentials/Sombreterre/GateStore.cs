@@ -29,6 +29,8 @@ public class GateStore
         public ulong DiscordId;
         public string DiscordName = "";
         public DateTime IssuedUtc;
+        /// <summary>Last time the token was presented; refreshed at most once a day to keep writes rare.</summary>
+        public DateTime LastUsedUtc;
     }
 
     private readonly string? _path;
@@ -82,11 +84,43 @@ public class GateStore
         return token;
     }
 
-    public TokenRecord? FindToken(string token)
+    /// <summary>
+    /// The record behind a token, or null when it is unknown or has gone unused for longer than
+    /// <paramref name="idle"/>, in which case it is dropped.
+    /// </summary>
+    public TokenRecord? FindToken(string token, DateTime nowUtc, TimeSpan idle)
     {
         lock (_lock)
         {
-            return _data.Tokens.TryGetValue(Hash(token), out var record) ? record : null;
+            var key = Hash(token);
+            if (!_data.Tokens.TryGetValue(key, out var record)) return null;
+
+            var lastUsed = record.LastUsedUtc > record.IssuedUtc ? record.LastUsedUtc : record.IssuedUtc;
+            if (nowUtc - lastUsed > idle)
+            {
+                _data.Tokens.Remove(key);
+                Save();
+                return null;
+            }
+
+            if (nowUtc - lastUsed > TimeSpan.FromDays(1))
+            {
+                record.LastUsedUtc = nowUtc;
+                Save();
+            }
+            return record;
+        }
+    }
+
+    /// <summary>Revokes every launcher token of one Discord account. Returns how many there were.</summary>
+    public int RevokeAllFor(ulong discordId)
+    {
+        lock (_lock)
+        {
+            var keys = _data.Tokens.Where(t => t.Value.DiscordId == discordId).Select(t => t.Key).ToList();
+            foreach (var key in keys) _data.Tokens.Remove(key);
+            if (keys.Count > 0) Save();
+            return keys.Count;
         }
     }
 
@@ -142,13 +176,14 @@ public class GateStore
         }
     }
 
-    public bool Unlink(string playerUid)
+    /// <summary>Removes the link of a game account. Returns the Discord account it was linked to.</summary>
+    public ulong? Unlink(string playerUid)
     {
         lock (_lock)
         {
-            if (!_data.Links.Remove(playerUid)) return false;
+            if (!_data.Links.Remove(playerUid, out var discordId)) return null;
             Save();
-            return true;
+            return discordId;
         }
     }
 
