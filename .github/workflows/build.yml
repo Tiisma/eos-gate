@@ -1,0 +1,98 @@
+name: Build
+
+# Builds and tests the server mod (Th3Essentials + the Sombreterre gate) and the
+# SombreterreGate.Client mod against the game the server actually runs: Stratum,
+# which downloads the official Vintage Story server and patches it. The game files
+# are only used on the runner and never uploaded anywhere.
+#
+# A version tag (v*) also attaches both mod archives, with their SHA-256, to a
+# DRAFT GitHub release, published by hand after review.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - sombreterre-gate
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  STRATUM_TAG: v1.22.7-stratum.2
+  STRATUM_ASSET: stratum-1.22.7-stratum.2-linux-x64.zip
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache the game files
+        id: game-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/stratum
+          key: game-${{ env.STRATUM_TAG }}
+
+      - name: Prepare Stratum and the game files it patches
+        if: steps.game-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ runner.temp }}/stratum
+        run: |
+          mkdir -p "$TARGET"
+          gh release download "$STRATUM_TAG" --repo StratumServer/Stratum --pattern "$STRATUM_ASSET" --dir "$RUNNER_TEMP"
+          unzip -q "$RUNNER_TEMP/$STRATUM_ASSET" -d "$TARGET"
+          chmod +x "$TARGET/StratumServer"
+          (cd "$TARGET" && ./StratumServer --stratum-prepare-only --stratum-no-banner)
+          test -f "$TARGET/VintagestoryAPI.dll"
+
+      - name: Build and package the server mod
+        env:
+          VINTAGE_STORY_PRE: ${{ runner.temp }}/stratum
+        run: ./build.sh
+
+      - name: Build and package the client mod
+        env:
+          VINTAGE_STORY_PRE: ${{ runner.temp }}/stratum
+        run: |
+          dotnet build SombreterreGate.Client -c Release
+          version=$(python3 -c "import json;print(json.load(open('SombreterreGate.Client/modinfo.json'))['version'])")
+          (cd SombreterreGate.Client/bin/Release/Mods/sombreterregate && zip -q "$GITHUB_WORKSPACE/Releases/sombreterregate_${version}.zip" SombreterreGate.Client.dll modinfo.json)
+
+      - name: Test
+        env:
+          VINTAGE_STORY_PRE: ${{ runner.temp }}/stratum
+        run: dotnet test Tests/Tests.csproj -c Release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mods
+          path: Releases/*.zip
+          retention-days: 14
+
+      - name: Draft a release for a version tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cd Releases
+          sha256sum *.zip > SHA256SUMS.txt
+          prerelease=""
+          case "$RELEASE_TAG" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$RELEASE_TAG" *.zip SHA256SUMS.txt --draft $prerelease --title "The Exiles of Shadowland gate $RELEASE_TAG" --notes "Server mod (th3essentials) and client mod (sombreterregate), with their SHA-256."
