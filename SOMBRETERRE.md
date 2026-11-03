@@ -68,36 +68,44 @@ The server's own whitelist (`WhitelistMode`) should stay off: the gate replaces 
 
 `HttpListener` serves plain HTTP. For players outside this machine, put a reverse proxy with HTTPS in front of `HttpPrefix`, set `PublicBaseUrl` to its public address (ending with `/`), and update the launcher profile's `gateBaseUrl` and `packManifestUrl`. Keep `HttpPrefix` on loopback: the proxy is the only thing that should reach it.
 
-The Early Access server uses [Caddy](https://caddyserver.com) on Windows, which obtains and renews a Let's Encrypt certificate by itself, with the free name `eos-gate.duckdns.org` pointing at the server:
+The Early Access server uses [Caddy](https://caddyserver.com) on Windows, with the free name `eos-gate.duckdns.org` pointing at the server. Ports 80 and 443 belong to the host's Apache, which must keep running, so Caddy listens on **8443** only and proves the domain to Let's Encrypt through a DuckDNS TXT record (DNS challenge), which needs no port at all:
 
-1. Download Caddy for Windows amd64 from https://caddyserver.com/download and put `caddy.exe` in `C:\caddy\`.
-2. Create `C:\caddy\Caddyfile`:
+1. Download Caddy **with the DuckDNS module**: on https://caddyserver.com/download pick Windows amd64, search for and add the package `github.com/caddy-dns/duckdns`, then download. Save it as `C:\caddy\caddy.exe`. The plain Caddy build cannot do the DNS challenge.
+2. Create `C:\caddy\Caddyfile` (no extension), with the DuckDNS token from the top of the DuckDNS page. The file stays on the server: the token controls the domain.
 
    ```
-   eos-gate.duckdns.org {
-       reverse_proxy 127.0.0.1:42421 {
-           # HttpListener only answers requests addressed to its own prefix.
-           header_up Host 127.0.0.1:42421
-       }
+   {
+   	auto_https disable_redirects
+   }
+
+   eos-gate.duckdns.org:8443 {
+   	tls {
+   		dns duckdns YOUR_DUCKDNS_TOKEN
+   	}
+   	reverse_proxy 127.0.0.1:42421 {
+   		# HttpListener only answers requests addressed to its own prefix.
+   		header_up Host 127.0.0.1:42421
+   	}
    }
    ```
 
+   `disable_redirects` stops Caddy from opening port 80 for HTTP-to-HTTPS redirects, which would collide with Apache.
 3. Open the firewall (PowerShell as administrator), and the same ports in the hosting provider's network firewall if it has one:
 
    ```powershell
-   New-NetFirewallRule -DisplayName "Caddy HTTP/HTTPS" -Direction Inbound -Protocol TCP -LocalPort 80,443 -Action Allow
+   New-NetFirewallRule -DisplayName "EoS gate HTTPS" -Direction Inbound -Protocol TCP -LocalPort 8443 -Action Allow
    New-NetFirewallRule -DisplayName "Vintage Story TCP" -Direction Inbound -Protocol TCP -LocalPort 42420 -Action Allow
    New-NetFirewallRule -DisplayName "Vintage Story UDP" -Direction Inbound -Protocol UDP -LocalPort 42420 -Action Allow
    ```
 
-4. Try it in the foreground first: `C:\caddy\caddy.exe run --config C:\caddy\Caddyfile`. Once `https://eos-gate.duckdns.org/api/status` answers in a browser, stop it and install it as a service:
+4. Check that `C:\caddy\caddy.exe list-modules` lists `dns.providers.duckdns`, then try it in the foreground: `C:\caddy\caddy.exe run --config C:\caddy\Caddyfile`. The log should end with `certificate obtained successfully`. Once `https://eos-gate.duckdns.org:8443/api/status` answers in a browser, stop it and install it as a service:
 
    ```powershell
    sc.exe create caddy start= auto binPath= "C:\caddy\caddy.exe run --config C:\caddy\Caddyfile"
    sc.exe start caddy
    ```
 
-5. In `SombreterreGate.json`, set `"PublicBaseUrl": "https://eos-gate.duckdns.org/"`, and add `https://eos-gate.duckdns.org/api/link/callback` to the Discord application's OAuth2 redirects.
+5. In `SombreterreGate.json`, set `"PublicBaseUrl": "https://eos-gate.duckdns.org:8443/"`, and add `https://eos-gate.duckdns.org:8443/api/link/callback` to the Discord application's OAuth2 redirects.
 
 ## Building and testing
 
