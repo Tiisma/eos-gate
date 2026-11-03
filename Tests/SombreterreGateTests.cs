@@ -9,20 +9,31 @@ public class SombreterreGateTests
     private static readonly DateTime Now = new(2026, 11, 3, 12, 0, 0, DateTimeKind.Utc);
     private const ulong Alice = 1001;
     private const ulong Bob = 1002;
+    private static readonly TimeSpan Session = TimeSpan.FromHours(12);
 
     private static Func<ulong, MembershipStatus> Everyone(MembershipStatus status) => _ => status;
 
     [Fact]
-    public void TicketIsSingleUseAndExpires()
+    public void TicketBindsToTheFirstGameAccountAndExpires()
     {
         var book = new TicketBook();
-        var ticket = book.Issue(Alice, Now, TimeSpan.FromMinutes(3));
-        Assert.Equal(Alice, book.Consume(ticket, Now));
-        Assert.Null(book.Consume(ticket, Now));
+        var ticket = book.Issue(Alice, Now, TimeSpan.FromMinutes(10));
 
-        var late = book.Issue(Alice, Now, TimeSpan.FromMinutes(3));
-        Assert.Null(book.Consume(late, Now.AddMinutes(4)));
-        Assert.Null(book.Consume("forged", Now));
+        // First use binds it; the same account may come back with it for the session.
+        Assert.Equal(Alice, book.Redeem(ticket, "uid-alice", Now, Session));
+        Assert.Equal(Alice, book.Redeem(ticket, "uid-alice", Now.AddHours(11), Session));
+        Assert.Null(book.Redeem(ticket, "uid-alice", Now.AddHours(13), Session));
+
+        // Read off the wire, a bound ticket is worthless to any other account.
+        var other = book.Issue(Bob, Now, TimeSpan.FromMinutes(10));
+        Assert.Equal(Bob, book.Redeem(other, "uid-bob", Now, Session));
+        Assert.Null(book.Redeem(other, "uid-thief", Now, Session));
+        Assert.Equal(Bob, book.Redeem(other, "uid-bob", Now, Session));
+
+        // An unused ticket still expires after its lifetime; a forged one never works.
+        var late = book.Issue(Alice, Now, TimeSpan.FromMinutes(10));
+        Assert.Null(book.Redeem(late, "uid-alice", Now.AddMinutes(11), Session));
+        Assert.Null(book.Redeem("forged", "uid-alice", Now, Session));
     }
 
     [Fact]
@@ -31,11 +42,11 @@ public class SombreterreGateTests
         var store = new GateStore(null);
         var book = new TicketBook();
 
-        var outcome = GateDecision.Evaluate("uid-alice", book.Issue(Alice, Now, TimeSpan.FromMinutes(3)), store, book, Everyone(MembershipStatus.Whitelisted), Now);
+        var outcome = GateDecision.Evaluate("uid-alice", book.Issue(Alice, Now, TimeSpan.FromMinutes(3)), store, book, Everyone(MembershipStatus.Whitelisted), Now, Session);
 
         Assert.Equal(GateOutcome.Admitted, outcome);
         Assert.Equal(Alice, store.LinkOf("uid-alice"));
-        Assert.Equal(GateOutcome.Admitted, GateDecision.Evaluate("uid-alice", book.Issue(Alice, Now, TimeSpan.FromMinutes(3)), store, book, Everyone(MembershipStatus.Whitelisted), Now));
+        Assert.Equal(GateOutcome.Admitted, GateDecision.Evaluate("uid-alice", book.Issue(Alice, Now, TimeSpan.FromMinutes(3)), store, book, Everyone(MembershipStatus.Whitelisted), Now, Session));
     }
 
     [Fact]
@@ -46,8 +57,8 @@ public class SombreterreGateTests
         store.Link("uid-alice", Alice);
 
         // Bob's ticket used from Alice's game account, and Alice's Discord from a second game account.
-        Assert.Equal(GateOutcome.PlayerLinkedElsewhere, GateDecision.Evaluate("uid-alice", book.Issue(Bob, Now, TimeSpan.FromMinutes(3)), store, book, Everyone(MembershipStatus.Whitelisted), Now));
-        Assert.Equal(GateOutcome.DiscordLinkedElsewhere, GateDecision.Evaluate("uid-other", book.Issue(Alice, Now, TimeSpan.FromMinutes(3)), store, book, Everyone(MembershipStatus.Whitelisted), Now));
+        Assert.Equal(GateOutcome.PlayerLinkedElsewhere, GateDecision.Evaluate("uid-alice", book.Issue(Bob, Now, TimeSpan.FromMinutes(3)), store, book, Everyone(MembershipStatus.Whitelisted), Now, Session));
+        Assert.Equal(GateOutcome.DiscordLinkedElsewhere, GateDecision.Evaluate("uid-other", book.Issue(Alice, Now, TimeSpan.FromMinutes(3)), store, book, Everyone(MembershipStatus.Whitelisted), Now, Session));
         Assert.Equal(Alice, store.LinkOf("uid-alice"));
         Assert.Null(store.LinkOf("uid-other"));
     }
@@ -60,7 +71,7 @@ public class SombreterreGateTests
     {
         var store = new GateStore(null);
         var book = new TicketBook();
-        Assert.Equal(expected, GateDecision.Evaluate("uid-alice", book.Issue(Alice, Now, TimeSpan.FromMinutes(3)), store, book, Everyone(status), Now));
+        Assert.Equal(expected, GateDecision.Evaluate("uid-alice", book.Issue(Alice, Now, TimeSpan.FromMinutes(3)), store, book, Everyone(status), Now, Session));
         Assert.Null(store.LinkOf("uid-alice"));
     }
 
@@ -113,9 +124,9 @@ public class SombreterreGateTests
         var second = book.Issue(Alice, Now, TimeSpan.FromMinutes(10));
         var bob = book.Issue(Bob, Now, TimeSpan.FromMinutes(10));
 
-        Assert.Null(book.Consume(first, Now));
-        Assert.Equal(Alice, book.Consume(second, Now));
-        Assert.Equal(Bob, book.Consume(bob, Now));
+        Assert.Null(book.Redeem(first, "uid-alice", Now, Session));
+        Assert.Equal(Alice, book.Redeem(second, "uid-alice", Now, Session));
+        Assert.Equal(Bob, book.Redeem(bob, "uid-bob", Now, Session));
     }
 
     [Theory]

@@ -30,9 +30,9 @@ public enum GateOutcome
 /// </summary>
 public static class GateDecision
 {
-    public static GateOutcome Evaluate(string playerUid, string ticket, GateStore store, TicketBook tickets, Func<ulong, MembershipStatus> membership, DateTime nowUtc)
+    public static GateOutcome Evaluate(string playerUid, string ticket, GateStore store, TicketBook tickets, Func<ulong, MembershipStatus> membership, DateTime nowUtc, TimeSpan session)
     {
-        var discordId = tickets.Consume(ticket, nowUtc);
+        var discordId = tickets.Redeem(ticket, playerUid, nowUtc, session);
         if (discordId == null) return GateOutcome.InvalidTicket;
 
         // Checked before linking, so an account that is not whitelisted yet is not tied to anything.

@@ -1,13 +1,14 @@
 {
     "type": "code",
     "modid": "sombreterregate",
-    "name": "Sombreterre Gate (client)",
-    "authors": ["Sombreterre"],
-    "description": "Hands the launch ticket of the Sombreterre launcher to the server on join.",
-    "version": "0.1.1",
+    "name": "The Exiles of Shadowland (client)",
+    "authors": ["The Exiles of Shadowland"],
+    "description": "Hands the launcher's ticket to the server on join, trims the main menu to Play, Settings and Quit, and shows the server's backgrounds.",
+    "version": "0.2.0",
     "side": "Client",
     "requiredOnClient": false,
     "requiredOnServer": false,
+    "backgroundPaths": ["assets/sombreterregate/textures/gui/backgrounds/eos-01.png"],
     "dependencies": {
         "game": "1.22.7"
     }

@@ -111,7 +111,7 @@ public class SombreterreGateHttpTests : IDisposable
         var token = _store.IssueToken(42, "alice", DateTime.UtcNow);
 
         var ticket = JObject.Parse(await (await _http.SendAsync(Authed(HttpMethod.Post, "api/ticket", token))).Content.ReadAsStringAsync())["ticket"]!.ToString();
-        Assert.Equal(42UL, _tickets.Consume(ticket, DateTime.UtcNow));
+        Assert.Equal(42UL, _tickets.Redeem(ticket, "uid-alice", DateTime.UtcNow, TimeSpan.FromHours(12)));
 
         var manifest = JObject.Parse(await (await _http.SendAsync(Authed(HttpMethod.Get, "api/pack.json", token))).Content.ReadAsStringAsync());
         Assert.Equal("core.zip", manifest["mods"]![0]!["file"]!.ToString());

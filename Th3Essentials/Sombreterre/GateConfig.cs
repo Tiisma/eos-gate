@@ -39,8 +39,14 @@ public class GateConfig
     /// </summary>
     public int TicketGraceSeconds = 60;
 
-    /// <summary>How long a launch ticket stays valid after the launcher asked for it.</summary>
+    /// <summary>How long a launch ticket stays valid after the launcher asked for it, until its first use.</summary>
     public int TicketLifetimeSeconds = 600;
+
+    /// <summary>
+    /// After its first use, how long a ticket keeps letting the same game account back in (the game's
+    /// Play button after leaving the server). Bound to that account: useless to anyone else.
+    /// </summary>
+    public int TicketSessionHours = 12;
 
     /// <summary>
     /// Put players in spectator mode until their ticket is accepted, and swallow their chat, so the

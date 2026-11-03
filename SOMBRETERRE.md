@@ -7,6 +7,7 @@ This repository is a fork of [Th3Essentials](https://gitlab.com/th3dilli_vintage
 - **Discord role = whitelist.** A player may stay connected only if their Discord account is on the server's guild and holds the whitelist role. Removing the role, kicking or banning them on Discord, disconnects them if they are online.
 - **No command to type.** The player clicks "Link my Discord" once in the launcher. On each Play, the launcher fetches a single-use launch ticket and leaves it in the game folder. The `sombreterregate` client mod sends it to the server on join. The first valid ticket links the game account to that Discord account.
 - **Nothing to do before admission.** Until their ticket is accepted, a player is a spectator and their chat reaches nobody; their own game mode comes back on admission. A refused account is turned away on join for `RefusalCooldownSeconds`.
+- **A main menu for this server.** Once a player has joined, the game's main menu only offers **Play** (back to the server, no launcher needed), **Settings** and **Quit**, over the server's own backgrounds, one picked at random each time. Single player, multiplayer, the server dashboard, mods and credits are gone.
 - **Players online** on the bot's status (inherited from Th3Essentials) and on the launcher's home screen.
 - **The pack comes from the server.** The launcher's manifest is generated from the server's `Mods` folder plus `SombreterrePack/`. Server-side mods are never listed or served. Mods named in `ModDbModIds` are taken from the ModDB; every other client or universal `.zip` is served by the gate, to whitelisted launchers only.
 
@@ -14,7 +15,7 @@ How it is protected:
 
 - The game identity is the one the server authenticates itself; the Discord identity comes from Discord's OAuth2 flow, whose client secret never leaves the server.
 - **A shared link gives nothing away.** After Discord, the browser is sent back to a one-time listener on the launcher's own loopback address with a handoff code (RFC 8252). The token is only minted for the launcher holding both that code and its verifier, so sending someone the link cannot steal their account. The bot also DMs the Discord account each time a launcher is linked to it.
-- A ticket is single use, expires after `TicketLifetimeSeconds`, and one Discord account holds one at a time, so one read off the (unencrypted) game connection is worthless and tickets cannot be stockpiled for others.
+- A ticket expires after `TicketLifetimeSeconds` if unused, and one Discord account holds one at a time, so tickets cannot be stockpiled for others. Its first use binds it to the game account that presented it, which may then come back with it for `TicketSessionHours` (the menu's Play button); a ticket read off the (unencrypted) game connection is worthless to anyone else, since the server authenticates the game account itself.
 - Links are one to one and never replaced automatically.
 - Launcher tokens are stored server side as SHA-256 digests only, client side encrypted with the OS keyring, and expire after `TokenIdleDays` without use. `/gate revoke` and `/gate unlink` revoke them.
 - Link attempts are limited per address; `/gate lockdown true` stops new links, tickets and downloads at once.
@@ -35,7 +36,7 @@ What it does not protect against: whoever controls the server machine controls t
 | `Th3Essentials/Sombreterre/GateHttpApi.cs` | HTTP API for the launcher |
 | `Th3Essentials/Sombreterre/DiscordOAuth.cs` | Discord authorization-code exchange |
 | `Th3Essentials/Sombreterre/PackBuilder.cs` | Pack manifest from the mod folders |
-| `SombreterreGate.Client/` | Client mod that sends the ticket |
+| `SombreterreGate.Client/` | Client mod: sends the ticket, trims the main menu, shows the server's backgrounds |
 | `Tests/SombreterreGate*.cs` | Unit tests and HTTP API tests |
 | `SombreterreGate.Tests/` | Scenarios on an embedded Stratum server (Atlas): freeze, refusal, cooldown, mode restore |
 
@@ -60,6 +61,7 @@ What it does not protect against: whoever controls the server machine controls t
      "PublicBaseUrl": "",
      "TicketGraceSeconds": 60,
      "TicketLifetimeSeconds": 600,
+     "TicketSessionHours": 12,
      "FreezeUntilAdmitted": true,
      "RefusalCooldownSeconds": 60,
      "TokenIdleDays": 60,
@@ -98,6 +100,18 @@ On Stratum, `ClientModPolicy` in `Data/stratum.json` decides which client-side m
 ```
 
 The server's own whitelist (`WhitelistMode`) should stay off: the gate replaces it, and a native whitelist would turn new players away before they can link.
+
+## The main menu and its backgrounds
+
+The game runs no mod code at its main menu, so the client mod changes the menu while the player is on the server, and the changed menu is what they see when they leave it. The launcher always starts the game straight onto the server, so in practice players never see the game's own menu. If the game's menu ever changes in a way the mod does not recognise, it keeps the game's own menu and says so in `client-main.log`.
+
+The **Play** button needs the server address, which launcher 0.1.3 and later write next to the ticket. With an older launcher, Play is not shown.
+
+To add backgrounds (screenshots of the server, for instance):
+
+1. Save them as PNG, 1920×1080 or larger, in `SombreterreGate.Client/assets/sombreterregate/textures/gui/backgrounds/`.
+2. Optionally list one in `backgroundPaths` in `SombreterreGate.Client/modinfo.json`: that one shows on the very first menu, before the mod has run.
+3. Bump the version in that `modinfo.json`, rebuild and package the client mod with its `assets` folder (CI does it), replace the zip in `SombreterrePack/`, and run `/gate reloadpack`. Players get it on their next Play.
 
 ## Going online
 
@@ -175,7 +189,7 @@ dotnet test Tests/Tests.csproj --filter "FullyQualifiedName~Sombreterre"
 dotnet test SombreterreGate.Tests            # embedded server scenarios
 ```
 
-`Releases/` holds the packages and is git-ignored. Zip `SombreterreGate.Client/bin/Release/Mods/sombreterregate/` (its `.dll` and `modinfo.json`) for the client mod.
+`Releases/` holds the packages and is git-ignored. For the client mod, zip the `.dll`, `modinfo.json` and the `assets` folder of `SombreterreGate.Client/bin/Release/Mods/sombreterregate/`, with forward slashes in the paths (CI does it with `zip -r`; PowerShell's `Compress-Archive` writes backslashes).
 
 ## What has been verified
 

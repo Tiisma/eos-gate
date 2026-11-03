@@ -212,7 +212,7 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
         }
 
         var wasLinked = _store.LinkOf(player.PlayerUID) != null;
-        var outcome = GateDecision.Evaluate(player.PlayerUID, packet.Ticket ?? "", _store, _tickets, Membership, DateTime.UtcNow);
+        var outcome = GateDecision.Evaluate(player.PlayerUID, packet.Ticket ?? "", _store, _tickets, Membership, DateTime.UtcNow, TimeSpan.FromHours(Math.Max(1, _config.TicketSessionHours)));
         if (outcome == GateOutcome.Admitted)
         {
             _admitted[player.PlayerUID] = true;

@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using HarmonyLib;
 using ProtoBuf;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -19,20 +22,41 @@ public class GateTicketPacket
     public string Ticket = "";
 }
 
-/// <summary>What the Sombreterre launcher writes into ModConfig right before it starts the game.</summary>
+/// <summary>What the launcher writes into ModConfig right before it starts the game.</summary>
 public class TicketFile
 {
     public string Ticket = "";
+
+    /// <summary>"host:port" of the server the game was launched for (launcher 0.1.3 and later).</summary>
+    public string Server = "";
 }
 
 /// <summary>
-/// Hands the launch ticket the launcher left in ModConfig to the server.
+/// What this game process knows about its launch: the ticket and the server. Static on purpose, so it
+/// outlives the world it was read in. The server binds the ticket to this player's game account on
+/// first use, so resending it after a disconnect (the main menu's Play button) lets this player, and
+/// only this player, back in for the rest of the session.
+/// </summary>
+internal static class GateSession
+{
+    public static string? Ticket;
+    public static string? Server;
+
+    /// <summary>Main menu backgrounds this mod ships, read from its assets while a world was loaded.</summary>
+    public static readonly List<byte[]> Backgrounds = new();
+}
+
+/// <summary>
+/// The client side of The Exiles of Shadowland gate.
 ///
-/// The ticket is read as soon as the mod starts and the file deleted, so a stale one never lingers.
-/// It is then sent as soon as the gate's channel is connected and the player exists, checked every
-/// second rather than tied to one loading event: a heavily modded world can take long to finish
-/// loading, and the server only waits so long. Every step is written to client-main.log so a
-/// refused join can be explained from the player's side.
+/// Reads the launch ticket the launcher left in ModConfig as soon as the mod starts and deletes the
+/// file, then sends the ticket once the gate's channel is connected, checking every second rather than
+/// waiting on one loading event: a heavily modded world can take long to load, and the server only
+/// waits so long. Every step is written to client-main.log so a refused join can be explained.
+///
+/// It also installs the main menu changes (see <see cref="MainMenuPatches"/>). The game starts no mod
+/// code at the main menu itself; the launcher always starts the game straight onto the server, so the
+/// patches are in place by the time the player first sees the menu, when they leave the server.
 /// On a server without the gate (single player, another server) the channel never connects and
 /// nothing is sent.
 /// </summary>
@@ -46,9 +70,9 @@ public class GateClientSystem : ModSystem
 
     private ICoreClientAPI _capi = null!;
     private IClientNetworkChannel _channel = null!;
-    private string? _ticket;
     private long _listenerId;
     private int _attempts;
+    private bool _sent;
 
     public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Client;
 
@@ -57,26 +81,49 @@ public class GateClientSystem : ModSystem
         _capi = capi;
         _channel = capi.Network.RegisterChannel(GateTicketPacket.Channel).RegisterMessageType<GateTicketPacket>();
 
-        _ticket = ReadAndDeleteTicket();
-        if (_ticket == null) return;
+        LoadBackgrounds();
+        MainMenuPatches.Apply(capi.Logger);
+
+        ReadAndDeleteTicket();
+        if (GateSession.Ticket == null) return;
 
         capi.Event.LevelFinalize += TrySend;
         _listenerId = capi.Event.RegisterGameTickListener(_ => TrySend(), RetryIntervalMs);
     }
 
-    private string? ReadAndDeleteTicket()
+    private void LoadBackgrounds()
+    {
+        try
+        {
+            var found = _capi.Assets.GetMany("textures/gui/backgrounds/", Mod.Info.ModID)
+                .Where(asset => asset.Name.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                .Select(asset => asset.Data)
+                .Where(data => data is { Length: > 0 })
+                .ToList();
+            if (found.Count == 0) return;
+            GateSession.Backgrounds.Clear();
+            GateSession.Backgrounds.AddRange(found);
+        }
+        catch (Exception e)
+        {
+            _capi.Logger.Warning($"{LogPrefix} Could not read the main menu backgrounds: {e.GetType().Name}");
+        }
+    }
+
+    private void ReadAndDeleteTicket()
     {
         var path = Path.Combine(GamePaths.ModConfig, TicketFileName);
         if (!File.Exists(path))
         {
-            _capi.Logger.Notification($"{LogPrefix} No launch ticket in {GamePaths.ModConfig}. Start the game from the launcher to join a gated server.");
-            return null;
+            if (GateSession.Ticket != null) _capi.Logger.Notification($"{LogPrefix} No new launch ticket; reusing this session's.");
+            else _capi.Logger.Notification($"{LogPrefix} No launch ticket in {GamePaths.ModConfig}. Start the game from the launcher to join a gated server.");
+            return;
         }
 
-        string? ticket = null;
+        TicketFile? file = null;
         try
         {
-            ticket = _capi.LoadModConfig<TicketFile>(TicketFileName)?.Ticket;
+            file = _capi.LoadModConfig<TicketFile>(TicketFileName);
         }
         catch (Exception e)
         {
@@ -92,18 +139,19 @@ public class GateClientSystem : ModSystem
             _capi.Logger.Warning($"{LogPrefix} Could not delete the launch ticket: {e.GetType().Name}");
         }
 
-        if (string.IsNullOrEmpty(ticket)) return null;
+        if (string.IsNullOrEmpty(file?.Ticket)) return;
+        GateSession.Ticket = file.Ticket;
+        if (!string.IsNullOrWhiteSpace(file.Server)) GateSession.Server = file.Server.Trim();
         _capi.Logger.Notification($"{LogPrefix} Launch ticket read; it will be sent once the server's gate channel is connected.");
-        return ticket;
     }
 
     private void TrySend()
     {
-        if (_ticket == null) return;
+        if (_sent || GateSession.Ticket == null) return;
 
         if (_channel.Connected && _capi.World?.Player != null)
         {
-            _channel.SendPacket(new GateTicketPacket { Ticket = _ticket });
+            _channel.SendPacket(new GateTicketPacket { Ticket = GateSession.Ticket });
             _capi.Logger.Notification($"{LogPrefix} Launch ticket sent after {_attempts} check(s).");
             Stop();
             return;
@@ -116,7 +164,7 @@ public class GateClientSystem : ModSystem
 
     private void Stop()
     {
-        _ticket = null;
+        _sent = true;
         _capi.Event.LevelFinalize -= TrySend;
         if (_listenerId != 0) _capi.Event.UnregisterGameTickListener(_listenerId);
         _listenerId = 0;

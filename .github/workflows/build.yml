@@ -74,7 +74,7 @@ jobs:
         run: |
           dotnet build SombreterreGate.Client -c Release
           version=$(python3 -c "import json;print(json.load(open('SombreterreGate.Client/modinfo.json'))['version'])")
-          (cd SombreterreGate.Client/bin/Release/Mods/sombreterregate && zip -q "$GITHUB_WORKSPACE/Releases/sombreterregate_${version}.zip" SombreterreGate.Client.dll modinfo.json)
+          (cd SombreterreGate.Client/bin/Release/Mods/sombreterregate && zip -qr "$GITHUB_WORKSPACE/Releases/sombreterregate_${version}.zip" SombreterreGate.Client.dll modinfo.json assets)
 
       - name: Test
         env:
