@@ -66,7 +66,38 @@ The server's own whitelist (`WhitelistMode`) should stay off: the gate replaces 
 
 ## Going online
 
-`HttpListener` serves plain HTTP. For players outside this machine, put a reverse proxy with HTTPS in front of `HttpPrefix`, set `PublicBaseUrl` to its public address (ending with `/`), and update the launcher profile's `gateBaseUrl` and `packManifestUrl`. On Windows, listening on anything other than loopback also needs a URL ACL (`netsh http add urlacl`).
+`HttpListener` serves plain HTTP. For players outside this machine, put a reverse proxy with HTTPS in front of `HttpPrefix`, set `PublicBaseUrl` to its public address (ending with `/`), and update the launcher profile's `gateBaseUrl` and `packManifestUrl`. Keep `HttpPrefix` on loopback: the proxy is the only thing that should reach it.
+
+The Early Access server uses [Caddy](https://caddyserver.com) on Windows, which obtains and renews a Let's Encrypt certificate by itself, with the free name `eos-gate.duckdns.org` pointing at the server:
+
+1. Download Caddy for Windows amd64 from https://caddyserver.com/download and put `caddy.exe` in `C:\caddy\`.
+2. Create `C:\caddy\Caddyfile`:
+
+   ```
+   eos-gate.duckdns.org {
+       reverse_proxy 127.0.0.1:42421 {
+           # HttpListener only answers requests addressed to its own prefix.
+           header_up Host 127.0.0.1:42421
+       }
+   }
+   ```
+
+3. Open the firewall (PowerShell as administrator), and the same ports in the hosting provider's network firewall if it has one:
+
+   ```powershell
+   New-NetFirewallRule -DisplayName "Caddy HTTP/HTTPS" -Direction Inbound -Protocol TCP -LocalPort 80,443 -Action Allow
+   New-NetFirewallRule -DisplayName "Vintage Story TCP" -Direction Inbound -Protocol TCP -LocalPort 42420 -Action Allow
+   New-NetFirewallRule -DisplayName "Vintage Story UDP" -Direction Inbound -Protocol UDP -LocalPort 42420 -Action Allow
+   ```
+
+4. Try it in the foreground first: `C:\caddy\caddy.exe run --config C:\caddy\Caddyfile`. Once `https://eos-gate.duckdns.org/api/status` answers in a browser, stop it and install it as a service:
+
+   ```powershell
+   sc.exe create caddy start= auto binPath= "C:\caddy\caddy.exe run --config C:\caddy\Caddyfile"
+   sc.exe start caddy
+   ```
+
+5. In `SombreterreGate.json`, set `"PublicBaseUrl": "https://eos-gate.duckdns.org/"`, and add `https://eos-gate.duckdns.org/api/link/callback` to the Discord application's OAuth2 redirects.
 
 ## Building and testing
 
