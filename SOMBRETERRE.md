@@ -37,6 +37,7 @@ What it does not protect against: whoever controls the server machine controls t
 | `Th3Essentials/Sombreterre/DiscordOAuth.cs` | Discord authorization-code exchange |
 | `Th3Essentials/Sombreterre/PackBuilder.cs` | Pack manifest from the mod folders |
 | `SombreterreGate.Client/` | Client mod: sends the ticket, trims the main menu, shows the server's backgrounds |
+| `SombreterreGate.Startup/` | Startup hook shipped in the client mod: the server's main menu from the game's first screen |
 | `Tests/SombreterreGate*.cs` | Unit tests and HTTP API tests |
 | `SombreterreGate.Tests/` | Scenarios on an embedded Stratum server (Atlas): freeze, refusal, cooldown, mode restore |
 
@@ -60,7 +61,7 @@ What it does not protect against: whoever controls the server machine controls t
      "HttpPrefix": "http://127.0.0.1:42421/",
      "PublicBaseUrl": "",
      "TicketGraceSeconds": 60,
-     "TicketLifetimeSeconds": 600,
+     "TicketLifetimeSeconds": 21600,
      "TicketSessionHours": 12,
      "FreezeUntilAdmitted": true,
      "RefusalCooldownSeconds": 60,
@@ -103,9 +104,11 @@ The server's own whitelist (`WhitelistMode`) should stay off: the gate replaces 
 
 ## The main menu and its backgrounds
 
-The game runs no mod code at its main menu, so the client mod changes the menu while the player is on the server, and the changed menu is what they see when they leave it. The launcher always starts the game straight onto the server, so in practice players never see the game's own menu. If the game's menu ever changes in a way the mod does not recognise, it keeps the game's own menu and says so in `client-main.log`.
+The game runs no mod code at its main menu. The client mod therefore also ships a .NET startup hook, `SombreterreGate.Startup.dll`, in its zip under `native/` (a folder the game's mod loader skips). Launcher 0.1.5 and later copy it to `.eos-startup/` in the installation after each pack sync and start the game with `DOTNET_STARTUP_HOOKS` pointing at it, without connecting to the server: the game opens on the server's menu, and the player joins with **Play** when they are ready, after changing settings (and restarting for a new language) if they want to. The hook logs to `.eos-startup/startup.log`.
 
-The **Play** button needs the server address, which launcher 0.1.3 and later write next to the ticket. With an older launcher, Play is not shown.
+Without the hook (an older launcher), the client mod changes the menu once the player is on the server, and the changed menu shows when they leave it. Either way, if the game's menu ever changes in a way the mod does not recognise, it keeps the game's own menu and says so in its log.
+
+The **Play** button reads the server address from the ticket file the launcher writes before each launch (launcher 0.1.3 and later); the client mod leaves that file in place. Without it, Play is not shown. Since the player may sit in the settings before choosing Play, `TicketLifetimeSeconds` defaults to 6 hours; an unused ticket only sits in that player's game folder.
 
 To add backgrounds (screenshots of the server, for instance):
 
@@ -189,7 +192,7 @@ dotnet test Tests/Tests.csproj --filter "FullyQualifiedName~Sombreterre"
 dotnet test SombreterreGate.Tests            # embedded server scenarios
 ```
 
-`Releases/` holds the packages and is git-ignored. For the client mod, zip the `.dll`, `modinfo.json` and the `assets` folder of `SombreterreGate.Client/bin/Release/Mods/sombreterregate/`, with forward slashes in the paths (CI does it with `zip -r`; PowerShell's `Compress-Archive` writes backslashes).
+`Releases/` holds the packages and is git-ignored. For the client mod, zip the `.dll`, `modinfo.json`, the `native` folder (the startup hook, built along with the mod) and the `assets` folder of `SombreterreGate.Client/bin/Release/Mods/sombreterregate/`, with forward slashes in the paths (CI does it with `zip -r`; PowerShell's `Compress-Archive` writes backslashes).
 
 ## What has been verified
 

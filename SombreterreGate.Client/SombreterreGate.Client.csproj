@@ -30,6 +30,11 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- Built into this mod's native/ folder; see SombreterreGate.Startup.csproj. -->
+        <ProjectReference Include="..\SombreterreGate.Startup\SombreterreGate.Startup.csproj" ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+    <ItemGroup>
         <Content Include="modinfo.json">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
 using HarmonyLib;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -13,13 +15,16 @@ namespace SombreterreGate.Client;
 /// The Exiles of Shadowland main menu: Play (back to the server), Settings and Quit, over the server's
 /// own backgrounds. Single player, multiplayer, the server dashboard, mods and credits are not offered.
 ///
-/// Nothing of the game's menu is rebuilt here. While the game composes its left menu, the buttons it
-/// adds are filtered: the single player button becomes Play, the ones the server does not offer are
-/// skipped, and the next button is moved up into the place a skipped one would have taken. After the
-/// menu is composed, its background is swapped for one of this mod's, picked at random each time.
+/// Nothing of the game's menu is rebuilt here. The game's left menu adds its buttons through
+/// GuiComposerHelpers.AddButton; in its Compose those calls are rerouted to <see cref="AddMenuButton"/>,
+/// which filters them: the single player button becomes Play, the ones the server does not offer are
+/// skipped, and the next button is moved up into the place a skipped one would have taken. (Patching
+/// AddButton itself does not work: the JIT inlines that small method into the recompiled Compose.)
+/// After the menu is composed, its background is swapped for one of this mod's, picked at random each time.
 ///
 /// The patches are applied once per game process and deliberately never removed: the menu is shown
-/// after the world (and this mod's systems) have been unloaded.
+/// after the world (and this mod's systems) have been unloaded. The launcher applies them before the
+/// game's first menu, through SombreterreGate.Startup; the mod applies them on joining otherwise.
 /// </summary>
 internal static class MainMenuPatches
 {
@@ -31,12 +36,13 @@ internal static class MainMenuPatches
     private static readonly FieldInfo ScreenManagerField = AccessTools.Field(typeof(GuiCompositeMainMenuLeft), "screenManager");
     private static readonly FieldInfo BackgroundField = AccessTools.Field(typeof(GuiCompositeMainMenuLeft), "bgtex");
     private static readonly FieldInfo ComposerField = AccessTools.Field(typeof(ScreenManager), "mainMenuComposer");
+    private static readonly MethodInfo? AddButtonMethod = AccessTools.Method(typeof(GuiComposerHelpers), nameof(GuiComposerHelpers.AddButton),
+        new[] { typeof(GuiComposer), typeof(string), typeof(ActionConsumable), typeof(ElementBounds), typeof(CairoFont), typeof(EnumButtonStyle), typeof(string) });
 
     private static readonly Random Random = new();
     private static bool _applied;
     private static ILogger? _logger;
 
-    [ThreadStatic] private static bool _composing;
     [ThreadStatic] private static ElementBounds? _lastKept;
     [ThreadStatic] private static ScreenManager? _screenManager;
 
@@ -44,9 +50,15 @@ internal static class MainMenuPatches
     {
         if (_applied) return;
         _logger = logger;
-        if (ScreenManagerField == null || BackgroundField == null || ComposerField == null)
+        if (ScreenManagerField == null || BackgroundField == null || ComposerField == null || AddButtonMethod == null)
         {
             logger.Error("[SombreterreGate] This game version's main menu is not the one expected; keeping the game's own.");
+            return;
+        }
+        if (Harmony.HasAnyPatches(HarmonyId))
+        {
+            // The startup hook got here first, with its own copy of this class.
+            _applied = true;
             return;
         }
         try
@@ -55,12 +67,10 @@ internal static class MainMenuPatches
             var self = typeof(MainMenuPatches);
             harmony.Patch(AccessTools.Method(typeof(GuiCompositeMainMenuLeft), "Compose"),
                 prefix: new HarmonyMethod(self, nameof(BeforeCompose)),
-                postfix: new HarmonyMethod(self, nameof(AfterCompose)));
+                postfix: new HarmonyMethod(self, nameof(AfterCompose)),
+                transpiler: new HarmonyMethod(self, nameof(RerouteButtons)));
             harmony.Patch(AccessTools.Method(typeof(GuiCompositeMainMenuLeft), "updateButtonActiveFlag"),
                 prefix: new HarmonyMethod(self, nameof(SetActiveButton)));
-            harmony.Patch(AccessTools.Method(typeof(GuiComposerHelpers), nameof(GuiComposerHelpers.AddButton),
-                    new[] { typeof(GuiComposer), typeof(string), typeof(ActionConsumable), typeof(ElementBounds), typeof(CairoFont), typeof(EnumButtonStyle), typeof(string) }),
-                prefix: new HarmonyMethod(self, nameof(FilterButton)));
             _applied = true;
             logger.Notification("[SombreterreGate] Main menu trimmed to Play, Settings and Quit.");
         }
@@ -73,14 +83,20 @@ internal static class MainMenuPatches
 
     private static void BeforeCompose(GuiCompositeMainMenuLeft __instance)
     {
-        _composing = true;
         _lastKept = null;
         _screenManager = ScreenManagerField.GetValue(__instance) as ScreenManager;
+        try
+        {
+            GateSession.BeforeMenu?.Invoke();
+        }
+        catch (Exception e)
+        {
+            _logger?.Warning($"[SombreterreGate] Could not read the launch details for the main menu: {e.GetType().Name}");
+        }
     }
 
     private static void AfterCompose(GuiCompositeMainMenuLeft __instance)
     {
-        _composing = false;
         try
         {
             ReplaceBackground(__instance);
@@ -91,11 +107,23 @@ internal static class MainMenuPatches
         }
     }
 
-    /// <summary>Prefix of GuiComposerHelpers.AddButton, active only while the left main menu composes.</summary>
-    private static bool FilterButton(GuiComposer composer, ref string text, ref ActionConsumable onClick, ElementBounds bounds, string key, ref GuiComposer __result)
+    private static IEnumerable<CodeInstruction> RerouteButtons(IEnumerable<CodeInstruction> instructions)
     {
-        if (!_composing) return true;
+        var replacement = AccessTools.Method(typeof(MainMenuPatches), nameof(AddMenuButton));
+        var rerouted = 0;
+        var result = instructions.Select(instruction =>
+        {
+            if (!instruction.Calls(AddButtonMethod)) return instruction;
+            rerouted++;
+            return new CodeInstruction(OpCodes.Call, replacement).MoveLabelsFrom(instruction).MoveBlocksFrom(instruction);
+        }).ToList();
+        if (rerouted == 0) _logger?.Warning("[SombreterreGate] The main menu adds no buttons the way this mod expects; its buttons are left as they are.");
+        return result;
+    }
 
+    /// <summary>Stands in for GuiComposerHelpers.AddButton in the left main menu's Compose, with the same signature.</summary>
+    private static GuiComposer AddMenuButton(GuiComposer composer, string text, ActionConsumable onClick, ElementBounds bounds, CairoFont font, EnumButtonStyle style, string key)
+    {
         if (key == "singleplayer" && GateSession.Server != null)
         {
             var server = GateSession.Server;
@@ -106,20 +134,16 @@ internal static class MainMenuPatches
                 screenManager?.ConnectToMultiplayer(server, null);
                 return true;
             };
-            _lastKept = bounds;
-            return true;
         }
-
-        if (key == "singleplayer" || Hidden.Contains(key))
+        else if (key == "singleplayer" || Hidden.Contains(key))
         {
             // Take the place of the last kept button, so the next one lands right below it.
             if (_lastKept != null) bounds.fixedY = _lastKept.fixedY;
-            __result = composer;
-            return false;
+            return composer;
         }
 
         _lastKept = bounds;
-        return true;
+        return composer.AddButton(text, onClick, bounds, font, style, key);
     }
 
     /// <summary>The game's version marks every menu button, some of which are no longer there.</summary>

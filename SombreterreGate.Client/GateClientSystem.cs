@@ -32,31 +32,19 @@ public class TicketFile
 }
 
 /// <summary>
-/// What this game process knows about its launch: the ticket and the server. Static on purpose, so it
-/// outlives the world it was read in. The server binds the ticket to this player's game account on
-/// first use, so resending it after a disconnect (the main menu's Play button) lets this player, and
-/// only this player, back in for the rest of the session.
-/// </summary>
-internal static class GateSession
-{
-    public static string? Ticket;
-    public static string? Server;
-
-    /// <summary>Main menu backgrounds this mod ships, read from its assets while a world was loaded.</summary>
-    public static readonly List<byte[]> Backgrounds = new();
-}
-
-/// <summary>
 /// The client side of The Exiles of Shadowland gate.
 ///
-/// Reads the launch ticket the launcher left in ModConfig as soon as the mod starts and deletes the
-/// file, then sends the ticket once the gate's channel is connected, checking every second rather than
+/// Reads the launch ticket the launcher left in ModConfig as soon as the mod starts, then sends the ticket once the gate's channel is connected, checking every second rather than
 /// waiting on one loading event: a heavily modded world can take long to load, and the server only
 /// waits so long. Every step is written to client-main.log so a refused join can be explained.
 ///
-/// It also installs the main menu changes (see <see cref="MainMenuPatches"/>). The game starts no mod
-/// code at the main menu itself; the launcher always starts the game straight onto the server, so the
-/// patches are in place by the time the player first sees the menu, when they leave the server.
+/// The file is left in place: the launcher overwrites it on every launch, and the startup hook
+/// (SombreterreGate.Startup) reads the server address from it for the main menu's Play button. A
+/// ticket is worth nothing once expired, and once used it only lets in the game account that used it.
+///
+/// It also installs the main menu changes (see <see cref="MainMenuPatches"/>) when the startup hook
+/// has not already: the game starts no mod code at the main menu itself, so without the hook the
+/// changed menu only shows after a first visit to the server.
 /// On a server without the gate (single player, another server) the channel never connects and
 /// nothing is sent.
 /// </summary>
@@ -84,7 +72,7 @@ public class GateClientSystem : ModSystem
         LoadBackgrounds();
         MainMenuPatches.Apply(capi.Logger);
 
-        ReadAndDeleteTicket();
+        ReadTicket();
         if (GateSession.Ticket == null) return;
 
         capi.Event.LevelFinalize += TrySend;
@@ -110,13 +98,12 @@ public class GateClientSystem : ModSystem
         }
     }
 
-    private void ReadAndDeleteTicket()
+    private void ReadTicket()
     {
         var path = Path.Combine(GamePaths.ModConfig, TicketFileName);
         if (!File.Exists(path))
         {
-            if (GateSession.Ticket != null) _capi.Logger.Notification($"{LogPrefix} No new launch ticket; reusing this session's.");
-            else _capi.Logger.Notification($"{LogPrefix} No launch ticket in {GamePaths.ModConfig}. Start the game from the launcher to join a gated server.");
+            _capi.Logger.Notification($"{LogPrefix} No launch ticket in {GamePaths.ModConfig}. Start the game from the launcher to join a gated server.");
             return;
         }
 
@@ -128,15 +115,6 @@ public class GateClientSystem : ModSystem
         catch (Exception e)
         {
             _capi.Logger.Warning($"{LogPrefix} Unreadable launch ticket: {e.GetType().Name}");
-        }
-
-        try
-        {
-            File.Delete(path);
-        }
-        catch (IOException e)
-        {
-            _capi.Logger.Warning($"{LogPrefix} Could not delete the launch ticket: {e.GetType().Name}");
         }
 
         if (string.IsNullOrEmpty(file?.Ticket)) return;

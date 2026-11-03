@@ -4,7 +4,7 @@
     "name": "The Exiles of Shadowland (client)",
     "authors": ["The Exiles of Shadowland"],
     "description": "Hands the launcher's ticket to the server on join, trims the main menu to Play, Settings and Quit, and shows the server's backgrounds.",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "side": "Client",
     "requiredOnClient": false,
     "requiredOnServer": false,

@@ -39,8 +39,12 @@ public class GateConfig
     /// </summary>
     public int TicketGraceSeconds = 60;
 
-    /// <summary>How long a launch ticket stays valid after the launcher asked for it, until its first use.</summary>
-    public int TicketLifetimeSeconds = 600;
+    /// <summary>
+    /// How long a launch ticket stays valid after the launcher asked for it, until its first use. Long
+    /// enough for a player to go through the game's settings before choosing Play in the main menu: an
+    /// unused ticket only sits in the player's own game folder, and one Discord account holds one at a time.
+    /// </summary>
+    public int TicketLifetimeSeconds = 21600;
 
     /// <summary>
     /// After its first use, how long a ticket keeps letting the same game account back in (the game's
