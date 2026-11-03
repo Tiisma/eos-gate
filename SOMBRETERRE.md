@@ -62,6 +62,18 @@ Why it is safe:
    Keep this file private: it holds the OAuth client secret.
 6. Start the server. The log says `Launcher API listening on ...`. After changing mods, run `/gate reloadpack`.
 
+On Stratum, `ClientModPolicy` in `Data/stratum.json` decides which client-side mods a player may load. When it is enabled, it silently disables `sombreterregate` on the player's side, the ticket is never sent, and the player is refused after `TicketGraceSeconds` (their `client-main.log` then says `Server sends me channel name sombreterregate, but no client side mod registered it`). Keep the policy if you want it, and allow the gate's client mod, along with any other client-only mod of the pack:
+
+```json
+"ClientModPolicy": {
+  "Enabled": true,
+  "StrictWhitelist": true,
+  "IncludeServerUniversalMods": true,
+  "AllowModIds": ["sombreterregate"],
+  "LogPolicyOnStartup": true
+}
+```
+
 The server's own whitelist (`WhitelistMode`) should stay off: the gate replaces it, and a native whitelist would turn new players away before they can link.
 
 ## Going online
