@@ -34,7 +34,7 @@ public class GateJoinScenarios : AtlasScenarioBase
         // Chat from a player who has not been admitted reaches nobody.
         ITestPlayer witness = await World.JoinPlayer("Witness");
         witness.Client.Clear();
-        player.Say("can anyone hear me");
+        await player.Say("can anyone hear me");
         await World.Ticks(20);
         Assert.DoesNotContain(witness.Client.ChatLines(), line => line.Contains("can anyone hear me"));
 
