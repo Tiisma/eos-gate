@@ -152,6 +152,6 @@
     "gate-kick-role-lost": "Your whitelist role was removed on Discord.",
     "gate-kick-cooldown": "You were just refused by the gate. Try again in {0} seconds, from The Exiles of Shadowland launcher.",
     "gate-kick-lockdown": "The server is temporarily closed to new connections by the staff. Check The Exiles of Shadowland Discord.",
-    "gate-waiting": "Checking your launcher… You can move around as a spectator for a moment.",
+    "gate-waiting": "Checking your launcher… You stay where you are for a moment, until it answers.",
     "gate-dm-linked": "Your Discord account was just linked to The Exiles of Shadowland launcher. If this was not you, tell the staff right away: they will revoke the link."
 }

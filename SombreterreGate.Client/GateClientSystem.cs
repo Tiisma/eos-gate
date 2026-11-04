@@ -72,6 +72,16 @@ public class GateClientSystem : ModSystem
         LoadBackgrounds();
         MainMenuPatches.Apply(capi.Logger);
 
+        // The creative world has no gate to hand a ticket to, and is only ever played in creative mode.
+        if (capi.IsSinglePlayer)
+        {
+            capi.Event.LevelFinalize += () =>
+            {
+                if (capi.World.Player.WorldData.CurrentGameMode != EnumGameMode.Creative) capi.SendChatMessage("/gamemode creative");
+            };
+            return;
+        }
+
         ReadTicket();
         if (GateSession.Ticket == null) return;
 

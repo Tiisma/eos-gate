@@ -141,6 +141,35 @@ public class SombreterreGateTests
     }
 
     [Fact]
+    public void OptionalFoldersAreListedApartWithTheirDescription()
+    {
+        var root = Directory.CreateTempSubdirectory("gate-optional-").FullName;
+        var required = Directory.CreateDirectory(Path.Combine(root, "required")).FullName;
+        var optional = Directory.CreateDirectory(Path.Combine(root, "optional")).FullName;
+        void Mod(string folder, string id, string extra = "")
+        {
+            using var archive = ZipFile.Open(Path.Combine(folder, id + ".zip"), ZipArchiveMode.Create);
+            using var writer = new StreamWriter(archive.CreateEntry("modinfo.json").Open());
+            writer.Write("{\"modid\":\"" + id + "\",\"version\":\"1.0.0\"" + extra + "}");
+        }
+        Mod(required, "core");
+        Mod(optional, "core");
+        Mod(optional, "shaders", ",\"name\":\"Nice shaders\",\"description\":\"Pretty light\"");
+
+        var pack = PackBuilder.Build("p", "1.22.7", new[] { required }, Array.Empty<string>(), new[] { optional });
+        var manifest = JObject.Parse(pack.ManifestJson);
+
+        Assert.Single(manifest["mods"]!);
+        var entry = Assert.Single(manifest["optional"]!);
+        Assert.Equal("shaders", entry["modid"]!.ToString());
+        Assert.Equal("Nice shaders", entry["name"]!.ToString());
+        Assert.Equal("Pretty light", entry["description"]!.ToString());
+        Assert.Equal(new[] { "shaders" }, pack.OptionalModIds);
+        Assert.True(pack.PrivateFiles.ContainsKey("shaders.zip"));
+        Directory.Delete(root, true);
+    }
+
+    [Fact]
     public void ClaimDoesNotOverrideALink()
     {
         var store = new GateStore(null);

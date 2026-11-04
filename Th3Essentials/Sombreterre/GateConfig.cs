@@ -93,6 +93,14 @@ public class GateConfig
     /// </summary>
     public List<string> AdditionalPackFolders = new() { "SombreterrePack" };
 
+    /// <summary>
+    /// Folders whose .zip mods players may choose to add from the launcher (shaders...). The launcher
+    /// keeps nothing else in a player's Mods folder. Stratum's ClientModPolicy is what the server itself
+    /// enforces: with it on, list these mods in its AllowModIds too. Relative paths are resolved from
+    /// the server data folder.
+    /// </summary>
+    public List<string> OptionalPackFolders = new() { "SombreterrePackOptional" };
+
     /// <summary>Pack name shown in the manifest.</summary>
     public string PackName = "Sombreterre";
 

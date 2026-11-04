@@ -89,6 +89,7 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
             // Newtonsoft appends a loaded list to the field's default instead of replacing it, so
             // defaults would pile up on every start. Duplicates carry no meaning in these lists.
             _config.AdditionalPackFolders = _config.AdditionalPackFolders.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            _config.OptionalPackFolders = _config.OptionalPackFolders.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             _config.BypassPlayerUids = _config.BypassPlayerUids.Distinct().ToList();
             _config.ModDbModIds = _config.ModDbModIds.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             sapi.StoreModConfig(_config, ConfigFile);
@@ -461,7 +462,9 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
         var folders = new[] { Path.Combine(GamePaths.DataPath, "Mods") }
             .Concat(_config.AdditionalPackFolders.Select(f => Path.IsPathRooted(f) ? f : Path.Combine(GamePaths.DataPath, f)))
             .ToList();
-        var pack = PackBuilder.Build(_config.PackName, GameVersion.ShortGameVersion, folders, _config.ModDbModIds);
+        var optional = _config.OptionalPackFolders.Select(f => Path.IsPathRooted(f) ? f : Path.Combine(GamePaths.DataPath, f)).ToList();
+        var pack = PackBuilder.Build(_config.PackName, GameVersion.ShortGameVersion, folders, _config.ModDbModIds, optional);
+        if (pack.OptionalModIds.Count > 0) _sapi.Logger.Notification($"[SombreterreGate] Pack: optional client mods {string.Join(", ", pack.OptionalModIds)}. With Stratum's ClientModPolicy on, list them in its AllowModIds.");
         foreach (var skipped in pack.Skipped) _sapi.Logger.Notification($"[SombreterreGate] Pack: skipped {skipped}");
         lock (_packLock) _pack = pack;
     }

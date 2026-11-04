@@ -109,13 +109,21 @@ The server's own whitelist (`WhitelistMode`) should stay on: it stops anyone wit
 - Entries for accounts no Discord account is tied to are never touched, nor are `BypassPlayerUids`, so staff can keep their own. An entry with the same name under another game account is left as it is and reported in the admin log.
 - The account a launcher names is not proven until it joins with a ticket. A false one only puts that account on the whitelist; without a ticket the gate still turns it away. Set `MinLauncherVersion` to 0.1.6 so that every launcher names its account.
 
+## Optional client mods
+
+Mods a player may choose to add, shaders for instance, go in `SombreterrePackOptional/` (`OptionalPackFolders`) in the server's data folder. After `/gate reloadpack`, they appear in the launcher under **Optional mods**, with the name and description from their `modinfo.json`.
+
+The launcher keeps a player's `Mods` folder to the server's mods and the optional ones they chose: anything else is moved to `Mods-disabled/` in their installation at each Play. That is a convenience, on the player's own machine. What the server enforces is Stratum's `ClientModPolicy`: turn it on with `StrictWhitelist`, and list `sombreterregate` and every optional mod in `AllowModIds`. The server log lists the optional mods at each pack rebuild.
+
 ## The main menu and its backgrounds
 
 The game runs no mod code at its main menu. The client mod therefore also ships a .NET startup hook, `SombreterreGate.Startup.dll`, in its zip under `native/` (a folder the game's mod loader skips). Launcher 0.1.5 and later copy it to `.eos-startup/` in the installation after each pack sync and start the game with `DOTNET_STARTUP_HOOKS` pointing at it, without connecting to the server: the game opens on the server's menu, and the player joins with **Play** when they are ready, after changing settings (and restarting for a new language) if they want to. The hook logs to `.eos-startup/startup.log`.
 
 Without the hook (an older launcher), the client mod changes the menu once the player is on the server, and the changed menu shows when they leave it. Either way, if the game's menu ever changes in a way the mod does not recognise, it keeps the game's own menu and says so in its log.
 
-The **Play** button reads the server address from the ticket file the launcher writes before each launch (launcher 0.1.3 and later); the client mod leaves that file in place. Without it, Play is not shown. Since the player may sit in the settings before choosing Play, `TicketLifetimeSeconds` defaults to 6 hours; an unused ticket only sits in that player's game folder.
+The **Play** button reads the server address from the ticket file the launcher writes before each launch (launcher 0.1.3 and later); the client mod leaves that file in place. Without it, Play is not shown. Since the player may sit in the settings before choosing Play, `TicketLifetimeSeconds` defaults to 6 hours; an unused ticket only sits in that player's game folder. While the game is open the launcher asks for a new ticket at half that lifetime, so Play keeps working after the player leaves the server, as long as the launcher stays open.
+
+The menu also offers **Creative world**: one creative-mode world per player, created the first time, saved as `Saves/eos-creative.vcdbs`, played alone with the player's mods. No other world can be created or opened.
 
 To add backgrounds (screenshots of the server, for instance):
 
