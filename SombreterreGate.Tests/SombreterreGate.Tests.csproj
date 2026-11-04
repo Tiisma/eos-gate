@@ -19,6 +19,9 @@
 
   <ItemGroup>
     <!-- Needed to compile game types used in scenarios; copied next to the test assembly as Atlas expects. -->
+    <Reference Include="VintagestoryLib">
+      <HintPath>$(VintageStoryPath)\VintagestoryLib.dll</HintPath>
+    </Reference>
     <Reference Include="VintagestoryAPI">
       <HintPath>$(VintageStoryPath)\VintagestoryAPI.dll</HintPath>
     </Reference>

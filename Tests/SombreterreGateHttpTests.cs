@@ -24,6 +24,8 @@ public class SombreterreGateHttpTests : IDisposable
         public void Log(string message) { }
         public void Audit(string message) { lock (Audits) Audits.Add(message); }
         public void NotifyLinked(ulong discordId) { lock (Notified) Notified.Add(discordId); }
+        public readonly List<(ulong DiscordId, string? Dropped)> WhitelistSyncs = new();
+        public void SyncWhitelist(ulong discordId, string? droppedUid) { lock (WhitelistSyncs) WhitelistSyncs.Add((discordId, droppedUid)); }
     }
 
     private const string Version = "0.1.2";
@@ -87,6 +89,35 @@ public class SombreterreGateHttpTests : IDisposable
         var body = new JObject { ["session"] = session, ["verifier"] = verifier };
         if (handoff != null) body["handoff"] = handoff;
         return JObject.Parse(await (await _http.PostAsync("api/link/poll", Body(body))).Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task TicketRequestRecordsTheGameAccountAndSyncsTheWhitelist()
+    {
+        var token = _store.IssueToken(42UL, "alice", DateTime.UtcNow);
+        async Task<HttpStatusCode> Ask(string body)
+        {
+            var request = Authed(HttpMethod.Post, "api/ticket", token);
+            request.Content = new StringContent(body);
+            return (await _http.SendAsync(request)).StatusCode;
+        }
+
+        Assert.Equal(HttpStatusCode.OK, await Ask("{\"playerUid\":\"uid-alice-1\",\"playerName\":\"Alice\"}"));
+        Assert.Equal("uid-alice-1", _store.AccountOf(42UL)!.PlayerUid);
+        Assert.Equal((42UL, (string?)null), _backend.WhitelistSyncs[^1]);
+
+        Assert.Equal(HttpStatusCode.OK, await Ask("{\"playerUid\":\"uid-alice-2\",\"playerName\":\"Alice\"}"));
+        Assert.Equal((42UL, (string?)"uid-alice-1"), _backend.WhitelistSyncs[^1]);
+
+        // A malformed account is ignored rather than stored, and does not stop the ticket.
+        Assert.Equal(HttpStatusCode.OK, await Ask("{\"playerUid\":\"bad uid\",\"playerName\":\"<@everyone>\"}"));
+        Assert.Equal("uid-alice-2", _store.AccountOf(42UL)!.PlayerUid);
+
+        // Without an account (an older launcher) the whitelist still syncs from what is known.
+        Assert.Equal(HttpStatusCode.OK, await Ask("{}"));
+
+        _store.Link("uid-bob-1234", 77UL);
+        Assert.Equal(HttpStatusCode.Conflict, await Ask("{\"playerUid\":\"uid-bob-1234\",\"playerName\":\"Bob\"}"));
     }
 
     [Fact]

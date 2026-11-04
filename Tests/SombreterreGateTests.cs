@@ -141,6 +141,48 @@ public class SombreterreGateTests
     }
 
     [Fact]
+    public void ClaimDoesNotOverrideALink()
+    {
+        var store = new GateStore(null);
+        store.Link("uid-alice", Alice);
+
+        Assert.Equal(GateStore.ClaimOutcome.PlayerLinkedElsewhere, store.Claim(Alice + 1, "uid-alice", "Alice", out _));
+        Assert.Equal(GateStore.ClaimOutcome.DiscordLinkedElsewhere, store.Claim(Alice, "uid-other", "Other", out _));
+        Assert.Equal(GateStore.ClaimOutcome.Claimed, store.Claim(Alice, "uid-alice", "Alice", out var dropped));
+        Assert.Null(dropped);
+        Assert.Equal("Alice", store.AccountOf(Alice)!.PlayerName);
+    }
+
+    [Fact]
+    public void AnewClaimDropsThePreviousAccountAndTheLatestClaimOnAnAccountWins()
+    {
+        var store = new GateStore(null);
+        store.Claim(Alice, "uid-one", "One", out _);
+
+        store.Claim(Alice, "uid-two", "Two", out var dropped);
+        Assert.Equal("uid-one", dropped);
+        Assert.Equal("uid-two", store.AccountOf(Alice)!.PlayerUid);
+
+        store.Claim(Alice + 1, "uid-two", "Two", out dropped);
+        Assert.Null(dropped);
+        Assert.Null(store.AccountOf(Alice));
+        Assert.Equal("uid-two", store.AccountOf(Alice + 1)!.PlayerUid);
+    }
+
+    [Fact]
+    public void AccountHoldersCoverLinksAndClaimsAndUnlinkClearsTheClaim()
+    {
+        var store = new GateStore(null);
+        store.Link("uid-alice", Alice);
+        store.Claim(Alice, "uid-alice", "Alice", out _);
+        store.Claim(Alice + 1, "uid-bob", "Bob", out _);
+        Assert.Equal(new[] { Alice, Alice + 1 }, store.AccountHolders().OrderBy(id => id));
+
+        store.Unlink("uid-alice");
+        Assert.Null(store.AccountOf(Alice));
+    }
+
+    [Fact]
     public void UnlinkReportsTheDiscordAccountItFreed()
     {
         var store = new GateStore(null);

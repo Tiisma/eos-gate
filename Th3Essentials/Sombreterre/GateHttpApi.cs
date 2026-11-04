@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -38,6 +39,9 @@ namespace Th3Essentials.Sombreterre;
 /// </summary>
 public class GateHttpApi : IDisposable
 {
+    private static readonly Regex PlayerUidPattern = new("^[A-Za-z0-9+/=_-]{8,64}$", RegexOptions.CultureInvariant);
+    private static readonly Regex PlayerNamePattern = new(@"^[\p{L}\p{N}_.-]{1,32}$", RegexOptions.CultureInvariant);
+
     public interface IBackend
     {
         MembershipStatus Membership(ulong discordId);
@@ -50,6 +54,9 @@ public class GateHttpApi : IDisposable
 
         /// <summary>Tells a Discord account that a launcher was just linked to it, so a link they did not make is noticed.</summary>
         void NotifyLinked(ulong discordId);
+
+        /// <summary>Brings the server's whitelist in line with this Discord account's role. <paramref name="droppedUid"/> is an account it no longer plays with.</summary>
+        void SyncWhitelist(ulong discordId, string? droppedUid);
 
         /// <summary>True while staff has locked the gate: no new links, tickets or downloads.</summary>
         bool LockedDown { get; }
@@ -240,6 +247,22 @@ public class GateHttpApi : IDisposable
 
         if (method == "POST" && path == "/api/ticket")
         {
+            var body = await ReadBody(request);
+            var playerUid = body?["playerUid"]?.ToString();
+            var playerName = body?["playerName"]?.ToString();
+            string? droppedUid = null;
+            if (playerUid != null && playerName != null && PlayerUidPattern.IsMatch(playerUid) && PlayerNamePattern.IsMatch(playerName))
+            {
+                var claim = _store.Claim(record.DiscordId, playerUid, playerName, out droppedUid);
+                if (claim != GateStore.ClaimOutcome.Claimed)
+                {
+                    // The server would refuse this account at the door: say why before the game starts.
+                    Json(response, 409, new { error = claim == GateStore.ClaimOutcome.PlayerLinkedElsewhere ? "player-linked" : "discord-linked" });
+                    return;
+                }
+            }
+            _backend.SyncWhitelist(record.DiscordId, droppedUid);
+
             var ticket = _tickets.Issue(record.DiscordId, DateTime.UtcNow, TimeSpan.FromSeconds(_config.TicketLifetimeSeconds));
             Json(response, 200, new { ticket, expiresIn = _config.TicketLifetimeSeconds });
             return;

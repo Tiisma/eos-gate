@@ -2,6 +2,7 @@ using System.Reflection;
 using Atlas.Api;
 using Atlas.XUnit;
 using Th3Essentials.Sombreterre;
+using Vintagestory.Server;
 using Vintagestory.API.Common;
 using Vintagestory.API.Server;
 using Xunit;
@@ -18,6 +19,7 @@ namespace SombreterreGate.Tests;
 public class GateJoinScenarios : AtlasScenarioBase
 {
     private const string SavedModeKey = "sombreterregate-mode";
+    private const string SavedPositionKey = "sombreterregate-pos";
 
     private IServerPlayer ServerPlayer(ITestPlayer player) => (IServerPlayer)World.Api.World.PlayerByUid(player.Player.PlayerUID);
 
@@ -64,5 +66,64 @@ public class GateJoinScenarios : AtlasScenarioBase
         await World.Until(() => player.Player.WorldData.CurrentGameMode.ToString() == saved, 200);
         Assert.Equal(saved, player.Player.WorldData.CurrentGameMode.ToString());
         Assert.False(ServerPlayer(player).ServerData.CustomPlayerData.ContainsKey(SavedModeKey));
+    }
+
+    [AtlasScenario]
+    public async Task C_WaitingPlayer_IsHeldOnTheSpotAndAdmittedThere()
+    {
+        ITestPlayer player = await World.JoinPlayer("Wanderer");
+        var server = ServerPlayer(player);
+        await World.Until(() => server.ServerData.CustomPlayerData.ContainsKey(SavedPositionKey), 200);
+        var start = server.Entity.ServerPos.XYZ;
+        Assert.Equal(0f, server.WorldData.MoveSpeedMultiplier);
+
+        // Whatever moved them, they are put back.
+        server.Entity.TeleportToDouble(start.X + 40, start.Y + 30, start.Z + 40);
+        await World.Until(() => server.Entity.ServerPos.XYZ.DistanceTo(start) < 1, 200);
+        Assert.True(server.Entity.ServerPos.XYZ.DistanceTo(start) < 1);
+
+        // Moved right before an admission, they still come back to where they joined, at full speed.
+        server.Entity.TeleportToDouble(start.X + 40, start.Y + 30, start.Z + 40);
+        var gate = World.Api.ModLoader.GetModSystem<SombreterreGateSystem>();
+        typeof(SombreterreGateSystem).GetMethod("Unfreeze", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(gate, new object[] { server });
+        await World.Until(() => server.Entity.ServerPos.XYZ.DistanceTo(start) < 1, 200);
+        Assert.True(server.Entity.ServerPos.XYZ.DistanceTo(start) < 1);
+        Assert.Equal(1f, server.WorldData.MoveSpeedMultiplier);
+        Assert.False(server.ServerData.CustomPlayerData.ContainsKey(SavedPositionKey));
+    }
+
+    [AtlasScenario]
+    public async Task D_ServerWhitelist_FollowsTheDiscordRole()
+    {
+        var gate = World.Api.ModLoader.GetModSystem<SombreterreGateSystem>();
+        var list = ((ServerMain)World.Api.World).PlayerDataManager.WhitelistedPlayers;
+        var account = new GateStore.PlayerClaim { PlayerUid = "uid-of-holder-1234", PlayerName = "Holder" };
+        bool Listed(string uid) => list.Any(entry => entry.PlayerUID == uid);
+        await World.Ticks(1);
+
+        // Discord unavailable: nothing happens either way.
+        gate.ApplyWhitelist(1, MembershipStatus.Unknown, account, null);
+        Assert.False(Listed(account.PlayerUid));
+
+        gate.ApplyWhitelist(1, MembershipStatus.Whitelisted, account, null);
+        Assert.True(Listed(account.PlayerUid));
+        gate.ApplyWhitelist(1, MembershipStatus.Unknown, account, null);
+        Assert.True(Listed(account.PlayerUid));
+
+        // An entry staff made for someone else, under that name, is never taken over.
+        var impostor = new GateStore.PlayerClaim { PlayerUid = "uid-of-impostor-99", PlayerName = "Holder" };
+        gate.ApplyWhitelist(2, MembershipStatus.Whitelisted, impostor, null);
+        Assert.False(Listed(impostor.PlayerUid));
+        Assert.True(Listed(account.PlayerUid));
+
+        gate.ApplyWhitelist(1, MembershipStatus.MemberWithoutRole, account, null);
+        Assert.False(Listed(account.PlayerUid));
+
+        // A launcher moving to another game account takes the old one off.
+        var next = new GateStore.PlayerClaim { PlayerUid = "uid-of-holder-5678", PlayerName = "Holder2" };
+        gate.ApplyWhitelist(1, MembershipStatus.Whitelisted, account, null);
+        gate.ApplyWhitelist(1, MembershipStatus.Whitelisted, next, account.PlayerUid);
+        Assert.False(Listed(account.PlayerUid));
+        Assert.True(Listed(next.PlayerUid));
     }
 }

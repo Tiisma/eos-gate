@@ -22,6 +22,18 @@ public class GateStore
 
         /// <summary>Hex SHA-256 of a launcher token to the Discord user id it was issued to.</summary>
         public Dictionary<string, TokenRecord> Tokens = new();
+
+        /// <summary>
+        /// Discord user id to the game account its launcher plays with. Unproven until that account
+        /// joins with a ticket and becomes a link: it only decides who goes on the server's whitelist.
+        /// </summary>
+        public Dictionary<ulong, PlayerClaim> Claims = new();
+    }
+
+    public class PlayerClaim
+    {
+        public string PlayerUid = "";
+        public string PlayerName = "";
     }
 
     public class TokenRecord
@@ -176,12 +188,71 @@ public class GateStore
         }
     }
 
+    public enum ClaimOutcome
+    {
+        Claimed,
+        PlayerLinkedElsewhere,
+        DiscordLinkedElsewhere
+    }
+
+    /// <summary>
+    /// Records the game account a launcher says it plays with. A link always wins over a claim. Between
+    /// claims the latest wins, since nothing has proven either yet: a false one only puts an account on
+    /// the whitelist, and the server still turns that account away without a ticket.
+    /// </summary>
+    /// <param name="discordId">The Discord account of the launcher.</param>
+    /// <param name="playerUid">The game account it says it plays with.</param>
+    /// <param name="playerName">That account's name.</param>
+    /// <param name="droppedUid">An account this claim replaced and nobody else is tied to, for the whitelist to drop.</param>
+    public ClaimOutcome Claim(ulong discordId, string playerUid, string playerName, out string? droppedUid)
+    {
+        droppedUid = null;
+        lock (_lock)
+        {
+            if (_data.Links.TryGetValue(playerUid, out var linkedTo) && linkedTo != discordId) return ClaimOutcome.PlayerLinkedElsewhere;
+            if (_data.Links.Any(link => link.Value == discordId && link.Key != playerUid)) return ClaimOutcome.DiscordLinkedElsewhere;
+
+            _data.Claims.TryGetValue(discordId, out var previous);
+            if (previous != null && previous.PlayerUid == playerUid && previous.PlayerName == playerName) return ClaimOutcome.Claimed;
+
+            foreach (var other in _data.Claims.Where(claim => claim.Key != discordId && claim.Value.PlayerUid == playerUid).Select(claim => claim.Key).ToList())
+                _data.Claims.Remove(other);
+            if (previous != null && previous.PlayerUid != playerUid && !_data.Links.ContainsKey(previous.PlayerUid)) droppedUid = previous.PlayerUid;
+
+            _data.Claims[discordId] = new PlayerClaim { PlayerUid = playerUid, PlayerName = playerName };
+            Save();
+            return ClaimOutcome.Claimed;
+        }
+    }
+
+    /// <summary>The game account tied to a Discord account: its link, otherwise its claim. The name is empty when only a link is known.</summary>
+    public PlayerClaim? AccountOf(ulong discordId)
+    {
+        lock (_lock)
+        {
+            _data.Claims.TryGetValue(discordId, out var claim);
+            var linked = _data.Links.FirstOrDefault(link => link.Value == discordId).Key;
+            if (linked == null) return claim;
+            return new PlayerClaim { PlayerUid = linked, PlayerName = claim?.PlayerUid == linked ? claim.PlayerName : "" };
+        }
+    }
+
+    /// <summary>Every Discord account tied to a game account, by link or by claim.</summary>
+    public List<ulong> AccountHolders()
+    {
+        lock (_lock)
+        {
+            return _data.Links.Values.Concat(_data.Claims.Keys).Distinct().ToList();
+        }
+    }
+
     /// <summary>Removes the link of a game account. Returns the Discord account it was linked to.</summary>
     public ulong? Unlink(string playerUid)
     {
         lock (_lock)
         {
             if (!_data.Links.Remove(playerUid, out var discordId)) return null;
+            if (_data.Claims.TryGetValue(discordId, out var claim) && claim.PlayerUid == playerUid) _data.Claims.Remove(discordId);
             Save();
             return discordId;
         }

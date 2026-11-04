@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -9,7 +10,9 @@ using Th3Essentials.Discord;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
 using Vintagestory.API.Datastructures;
+using Vintagestory.API.MathTools;
 using Vintagestory.API.Server;
+using Vintagestory.Server;
 
 namespace Th3Essentials.Sombreterre;
 
@@ -20,8 +23,11 @@ namespace Th3Essentials.Sombreterre;
 /// Each join must present a fresh launch ticket (see <see cref="TicketBook"/>), sent by the
 /// SombreterreGate.Client mod. The first valid ticket links the game account to the Discord account
 /// that asked for it, so players never type a command. Until the ticket is accepted the player is
-/// frozen in spectator mode with their chat swallowed, so the wait cannot be used to play. Losing the
-/// role, or leaving the guild, kicks a linked player who is online.
+/// held on the spot in spectator mode with their chat swallowed, so the wait cannot be used to play.
+/// Losing the role, or leaving the guild, kicks a linked player who is online.
+///
+/// The server's own whitelist follows the same role (AutoWhitelist): the launcher names its game
+/// account when it asks for a ticket, so a player with the role is on the list before the game starts.
 ///
 /// Every security-relevant event (links, first joins, refusals, revocations) goes to the server log
 /// and, when Th3Essentials has an admin log channel, to Discord.
@@ -34,6 +40,17 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
 
     /// <summary>Where a frozen player's own game mode waits for their admission, in their server data.</summary>
     private const string SavedModeKey = "sombreterregate-mode";
+
+    /// <summary>Where a frozen player's position waits for their admission, as "x;y;z".</summary>
+    private const string SavedPositionKey = "sombreterregate-pos";
+
+    /// <summary>Where a frozen player's own move speed waits for their admission.</summary>
+    private const string SavedSpeedKey = "sombreterregate-speed";
+
+    private const int HoldCheckIntervalMs = 250;
+
+    /// <summary>How far a frozen player may be from their spot before being put back, in blocks.</summary>
+    private const double MaxHeldDistance = 0.5;
 
     private ICoreServerAPI _sapi = null!;
     private GateConfig _config = null!;
@@ -49,6 +66,9 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
 
     /// <summary>Players admitted this session, by UID. Cleared on disconnect, so every join is checked again.</summary>
     private readonly ConcurrentDictionary<string, bool> _admitted = new();
+
+    /// <summary>Frozen players online, by UID, and the spot they are held on.</summary>
+    private readonly ConcurrentDictionary<string, Vec3d> _heldAt = new();
 
     /// <summary>Game accounts refused recently, by UID, until when they are turned away on join.</summary>
     private readonly ConcurrentDictionary<string, DateTime> _refusedUntil = new();
@@ -101,7 +121,12 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
 
         sapi.Event.PlayerNowPlaying += OnPlayerNowPlaying;
         sapi.Event.PlayerChat += OnPlayerChat;
-        sapi.Event.PlayerDisconnect += player => _admitted.TryRemove(player.PlayerUID, out _);
+        sapi.Event.PlayerDisconnect += player =>
+        {
+            _admitted.TryRemove(player.PlayerUID, out _);
+            _heldAt.TryRemove(player.PlayerUID, out _);
+        };
+        sapi.Event.RegisterGameTickListener(_ => HoldPlayersInPlace(), HoldCheckIntervalMs);
 
         var th3 = sapi.ModLoader.GetModSystem<Th3Essentials>();
         th3.OnTh3DiscordReady += OnDiscordReady;
@@ -144,6 +169,7 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
                     if (discordId == null) return TextCommandResult.Error("No link for that UID.");
                     var revoked = _store.RevokeAllFor(discordId.Value);
                     Audit($"Staff unlinked player {uid} from Discord {discordId} and revoked {revoked} launcher token(s).");
+                    if (_config.AutoWhitelist) RemoveFromWhitelist(((ServerMain)_sapi.World).PlayerDataManager, uid, "staff unlinked it");
                     return TextCommandResult.Success($"Unlinked; {revoked} launcher token(s) revoked.");
                 })
             .EndSubCommand()
@@ -177,10 +203,73 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
         discord.Client.GuildMemberUpdated += (_, after) => OnMemberChanged(after.Id);
         discord.Client.UserLeft += (_, user) => OnMemberChanged(user.Id);
         discord.Client.UserBanned += (user, _) => OnMemberChanged(user.Id);
+        discord.Client.GuildMembersDownloaded += guild =>
+        {
+            if (guild.Id == _guildId) ReconcileWhitelist();
+            return Task.CompletedTask;
+        };
+        // The members may already be in by the time this runs.
+        if (discord.Client.GetGuild(_guildId)?.HasAllMembers == true) ReconcileWhitelist();
+    }
+
+    /// <summary>Catches up on the role changes made while the server was off.</summary>
+    private void ReconcileWhitelist()
+    {
+        foreach (var discordId in _store.AccountHolders()) SyncWhitelist(discordId, null);
+    }
+
+    public void SyncWhitelist(ulong discordId, string? droppedUid)
+    {
+        if (!_config.AutoWhitelist) return;
+        var membership = Membership(discordId);
+        var account = _store.AccountOf(discordId);
+        // The whitelist belongs to the main thread; Discord events and the launcher API do not run on it.
+        _sapi.Event.EnqueueMainThreadTask(() => ApplyWhitelist(discordId, membership, account, droppedUid), "sombreterregate-whitelist");
+    }
+
+    /// <summary>
+    /// An unknown membership (Discord down, members still loading) changes nothing. Players come off
+    /// only by their game account, and an entry under the same name but another account is reported
+    /// rather than touched, since the game would otherwise rewrite it to the account claimed here.
+    /// </summary>
+    public void ApplyWhitelist(ulong discordId, MembershipStatus membership, GateStore.PlayerClaim? account, string? droppedUid)
+    {
+        var players = ((ServerMain)_sapi.World).PlayerDataManager;
+        if (droppedUid != null) RemoveFromWhitelist(players, droppedUid, $"Discord {discordId} now plays with another game account");
+        if (account == null) return;
+
+        if (membership is MembershipStatus.NotMember or MembershipStatus.MemberWithoutRole)
+        {
+            RemoveFromWhitelist(players, account.PlayerUid, $"Discord {discordId} no longer holds the whitelist role");
+            return;
+        }
+        if (membership != MembershipStatus.Whitelisted) return;
+        if (players.WhitelistedPlayers.Any(entry => entry.PlayerUID == account.PlayerUid)) return;
+
+        var name = account.PlayerName.Length > 0 ? account.PlayerName : _sapi.PlayerData.GetPlayerDataByUid(account.PlayerUid)?.LastKnownPlayername;
+        if (string.IsNullOrEmpty(name)) return;
+        if (players.WhitelistedPlayers.Any(entry => string.Equals(entry.PlayerName, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            Audit($"Not whitelisting {account.PlayerUid} for Discord {discordId}: the name {name} is already on the whitelist under another game account.");
+            return;
+        }
+
+        players.WhitelistPlayer(name, account.PlayerUid, "Discord role", $"Discord {discordId}", DateTime.Now.AddYears(50));
+        Audit($"{name} ({account.PlayerUid}) added to the whitelist: Discord {discordId} holds the role.");
+    }
+
+    private void RemoveFromWhitelist(PlayerDataManager players, string playerUid, string reason)
+    {
+        if (_config.BypassPlayerUids.Contains(playerUid)) return;
+        var entry = players.WhitelistedPlayers.FirstOrDefault(candidate => candidate.PlayerUID == playerUid);
+        if (entry == null) return;
+        players.UnWhitelistPlayer(entry.PlayerName, playerUid);
+        Audit($"{entry.PlayerName} ({playerUid}) removed from the whitelist: {reason}.");
     }
 
     private Task OnMemberChanged(ulong discordId)
     {
+        SyncWhitelist(discordId, null);
         if (Membership(discordId) == MembershipStatus.Whitelisted) return Task.CompletedTask;
         var uid = _store.PlayerOf(discordId);
         if (uid == null) return Task.CompletedTask;
@@ -231,6 +320,7 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
         if (Bypassed(player))
         {
             _sapi.Logger.Notification($"[SombreterreGate] {player.PlayerName} joined through BypassPlayerUids.");
+            Unfreeze(player);
             return;
         }
         if (_admitted.ContainsKey(player.PlayerUID)) return;
@@ -269,26 +359,73 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
     }
 
     /// <summary>
-    /// Spectator mode until admission: no building, breaking, interacting or fighting. The player's
-    /// own mode is kept in their server data, so a crash or disconnect in between never loses it.
-    /// Uses the game's own /player gamemode command, which notifies every system that tracks modes.
+    /// Until admission: spectator mode, so no building, breaking, interacting or fighting, and held on
+    /// the spot. Spectator alone would let the player fly through walls and be admitted wherever they
+    /// ended up. A move speed of zero stops an ordinary client, and <see cref="HoldPlayersInPlace"/>
+    /// puts back any other. The player's own mode and position are kept in their server data, so a
+    /// crash or disconnect in between never loses them. Uses the game's own /player gamemode command,
+    /// which notifies every system that tracks modes.
     /// </summary>
     private void Freeze(IServerPlayer player)
     {
         if (!_config.FreezeUntilAdmitted) return;
         player.SendMessage(GlobalConstants.GeneralChatGroup, Lang.Get("th3essentials:gate-waiting"), EnumChatType.Notification);
 
+        var saved = player.ServerData.CustomPlayerData;
         var mode = player.WorldData.CurrentGameMode;
-        if (mode == EnumGameMode.Spectator) return;
-        if (!player.ServerData.CustomPlayerData.ContainsKey(SavedModeKey)) player.ServerData.CustomPlayerData[SavedModeKey] = mode.ToString();
-        SetGameMode(player, EnumGameMode.Spectator);
+        if (!saved.ContainsKey(SavedModeKey)) saved[SavedModeKey] = mode.ToString();
+        if (!saved.ContainsKey(SavedSpeedKey)) saved[SavedSpeedKey] = player.WorldData.MoveSpeedMultiplier.ToString(CultureInfo.InvariantCulture);
+        if (!saved.TryGetValue(SavedPositionKey, out var position) || ParsePosition(position) == null)
+        {
+            var current = player.Entity.ServerPos;
+            saved[SavedPositionKey] = string.Create(CultureInfo.InvariantCulture, $"{current.X};{current.Y};{current.Z}");
+        }
+        if (mode != EnumGameMode.Spectator) SetGameMode(player, EnumGameMode.Spectator);
+
+        player.WorldData.MoveSpeedMultiplier = 0;
+        player.BroadcastPlayerData();
+        _heldAt[player.PlayerUID] = ParsePosition(saved[SavedPositionKey])!;
+    }
+
+    private void HoldPlayersInPlace()
+    {
+        foreach (var (uid, position) in _heldAt)
+        {
+            if (_sapi.World.PlayerByUid(uid) is IServerPlayer { Entity: not null } player) MoveBack(player, position);
+        }
+    }
+
+    private static void MoveBack(IServerPlayer player, Vec3d position)
+    {
+        if (player.Entity.ServerPos.SquareDistanceTo(position.X, position.Y, position.Z) > MaxHeldDistance * MaxHeldDistance)
+            player.Entity.TeleportToDouble(position.X, position.Y, position.Z);
+    }
+
+    private static Vec3d? ParsePosition(string text)
+    {
+        var parts = text.Split(';');
+        if (parts.Length != 3) return null;
+        var numbers = new double[3];
+        for (var i = 0; i < 3; i++)
+        {
+            if (!double.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out numbers[i])) return null;
+        }
+        return new Vec3d(numbers[0], numbers[1], numbers[2]);
     }
 
     private void Unfreeze(IServerPlayer player)
     {
-        if (!player.ServerData.CustomPlayerData.TryGetValue(SavedModeKey, out var saved)) return;
-        player.ServerData.CustomPlayerData.Remove(SavedModeKey);
-        if (Enum.TryParse<EnumGameMode>(saved, out var mode) && mode != EnumGameMode.Spectator) SetGameMode(player, mode);
+        _heldAt.TryRemove(player.PlayerUID, out _);
+        var data = player.ServerData.CustomPlayerData;
+
+        if (data.Remove(SavedPositionKey, out var position) && ParsePosition(position) is { } origin) MoveBack(player, origin);
+        if (data.Remove(SavedModeKey, out var saved) && Enum.TryParse<EnumGameMode>(saved, out var mode) && mode != EnumGameMode.Spectator) SetGameMode(player, mode);
+
+        if (data.Remove(SavedSpeedKey, out var speedText))
+        {
+            player.WorldData.MoveSpeedMultiplier = float.TryParse(speedText, NumberStyles.Float, CultureInfo.InvariantCulture, out var speed) && speed > 0 ? speed : 1;
+            player.BroadcastPlayerData();
+        }
     }
 
     private void SetGameMode(IServerPlayer player, EnumGameMode mode)

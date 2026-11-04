@@ -15,6 +15,7 @@ How it is protected:
 
 - The game identity is the one the server authenticates itself; the Discord identity comes from Discord's OAuth2 flow, whose client secret never leaves the server.
 - **A shared link gives nothing away.** After Discord, the browser is sent back to a one-time listener on the launcher's own loopback address with a handoff code (RFC 8252). The token is only minted for the launcher holding both that code and its verifier, so sending someone the link cannot steal their account. The bot also DMs the Discord account each time a launcher is linked to it.
+- A player waiting for their ticket is in spectator mode at move speed zero and put back on their spot if they move anyway, then admitted exactly where they joined, in their own mode.
 - A ticket expires after `TicketLifetimeSeconds` if unused, and one Discord account holds one at a time, so tickets cannot be stockpiled for others. Its first use binds it to the game account that presented it, which may then come back with it for `TicketSessionHours` (the menu's Play button); a ticket read off the (unencrypted) game connection is worthless to anyone else, since the server authenticates the game account itself.
 - Links are one to one and never replaced automatically.
 - Launcher tokens are stored server side as SHA-256 digests only, client side encrypted with the OS keyring, and expire after `TokenIdleDays` without use. `/gate revoke` and `/gate unlink` revoke them.
@@ -39,7 +40,7 @@ What it does not protect against: whoever controls the server machine controls t
 | `SombreterreGate.Client/` | Client mod: sends the ticket, trims the main menu, shows the server's backgrounds |
 | `SombreterreGate.Startup/` | Startup hook shipped in the client mod: the server's main menu from the game's first screen |
 | `Tests/SombreterreGate*.cs` | Unit tests and HTTP API tests |
-| `SombreterreGate.Tests/` | Scenarios on an embedded Stratum server (Atlas): freeze, refusal, cooldown, mode restore |
+| `SombreterreGate.Tests/` | Scenarios on an embedded Stratum server (Atlas): holding on the spot, refusal, cooldown, mode and position restore, whitelist |
 
 ## Setting it up
 
@@ -64,6 +65,7 @@ What it does not protect against: whoever controls the server machine controls t
      "TicketLifetimeSeconds": 21600,
      "TicketSessionHours": 12,
      "FreezeUntilAdmitted": true,
+     "AutoWhitelist": true,
      "RefusalCooldownSeconds": 60,
      "TokenIdleDays": 60,
      "LinkSessionsPerAddress": 5,
@@ -100,7 +102,12 @@ On Stratum, `ClientModPolicy` in `Data/stratum.json` decides which client-side m
 }
 ```
 
-The server's own whitelist (`WhitelistMode`) should stay off: the gate replaces it, and a native whitelist would turn new players away before they can link.
+The server's own whitelist (`WhitelistMode`) should stay on: it stops anyone without the role at the door, including while the gate is down. With `AutoWhitelist` (on by default) it follows the Discord role by itself, so staff only give or take the role:
+
+- The launcher names its game account with each ticket request. If the Discord account holds the role, that account goes on the whitelist before the game starts.
+- Losing the role, leaving the guild, or `/gate unlink` takes it off and disconnects the player. Role changes made while the server was off are caught up once Discord's member list has loaded. While Discord is unavailable the list does not change.
+- Entries for accounts no Discord account is tied to are never touched, nor are `BypassPlayerUids`, so staff can keep their own. An entry with the same name under another game account is left as it is and reported in the admin log.
+- The account a launcher names is not proven until it joins with a ticket. A false one only puts that account on the whitelist; without a ticket the gate still turns it away. Set `MinLauncherVersion` to 0.1.6 so that every launcher names its account.
 
 ## The main menu and its backgrounds
 
@@ -173,8 +180,10 @@ The gate is only as safe as the machine it runs on. On the Early Access host:
 - **Secrets**: `ModConfig/Th3Config.json` (bot token), `ModConfig/SombreterreGate.json` (OAuth secret), `ModData/SombreterreGate-data.json` (links) and `C:\caddy\Caddyfile` (DuckDNS token) should be readable only by the account that runs the server and Caddy, and by administrators:
 
   ```powershell
-  icacls "<file>" /inheritance:r /grant:r "Administrators:F" "SYSTEM:F" "<server account>:R"
+  icacls "<file>" /inheritance:r /grant:r "Administrators:F" "SYSTEM:F" "<server account>:M"
   ```
+
+  The server account must keep write access (`M`): the gate rewrites its config and its links, and a config it cannot write to stops the gate from starting.
 
   If a secret leaks: reset it (Discord bot token, OAuth client secret, DuckDNS token), restart, then `/gate revoke` the accounts involved.
 - **Remote access**: RDP not exposed to the internet (VPN, or the host's allow-list of addresses), Windows and Apache patched. The firewall only opens 42420 (game) and 8443 (gate) for this project.
@@ -197,7 +206,7 @@ dotnet test SombreterreGate.Tests            # embedded server scenarios
 ## What has been verified
 
 - With real players on the Early Access Stratum server: Discord linking, the pack, tickets, automatic linking of the game account and admission.
-- On an embedded Stratum server (Atlas): freeze in spectator mode, chat swallowed, refusal after the grace period, cooldown on retry, own mode restored.
+- On an embedded Stratum server (Atlas): spectator mode at speed zero, put back on the spot when moved, chat swallowed, refusal after the grace period, cooldown on retry, own mode, position and speed restored, whitelist entries following the role.
 - Unit and HTTP tests: the loopback handoff (a shared link yields nothing), revocation, token expiry, one ticket per account, rate limits, lockdown, outdated launchers.
-- Not yet observed with a real client: the freeze and its release on admission, the DM on linking, the admin channel audit, the role-loss kick.
+- Not yet observed with a real client: being unable to move while waiting, the release on admission, the whitelist reacting to live Discord role changes, the DM on linking, the admin channel audit, the role-loss kick.
 - Th3Essentials' own date tests (`Tests/UnitTest1.cs`) fail on a machine with a non-US locale; that predates the fork.

@@ -40,6 +40,13 @@ public class GateConfig
     public int TicketGraceSeconds = 60;
 
     /// <summary>
+    /// Keep the server's own whitelist in line with WhitelistRoleId: a player goes on it as soon as the
+    /// launcher knows their game account and they hold the role, and comes off when they lose it.
+    /// Entries for accounts no Discord account is tied to are left alone.
+    /// </summary>
+    public bool AutoWhitelist = true;
+
+    /// <summary>
     /// How long a launch ticket stays valid after the launcher asked for it, until its first use. Long
     /// enough for a player to go through the game's settings before choosing Play in the main menu: an
     /// unused ticket only sits in the player's own game folder, and one Discord account holds one at a time.
