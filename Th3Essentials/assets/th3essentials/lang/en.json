@@ -143,7 +143,7 @@
     "wp-item-set": "Warp Item set",
     "wp-item-unset": "Warp Item unset",
     "bot-status": "players: {0}/{1}",
-    "gate-kick-no-ticket": "Start the game from The Exiles of Shadowland launcher to join this server.",
+    "gate-kick-no-ticket": "No valid launch ticket. Close the game, then press Play in an up-to-date The Exiles of Shadowland launcher.",
     "gate-kick-player-linked": "This game account is already linked to another Discord account. Contact the staff.",
     "gate-kick-discord-linked": "Your Discord account is already linked to another game account. Contact the staff.",
     "gate-kick-not-member": "Join The Exiles of Shadowland Discord server to play.",

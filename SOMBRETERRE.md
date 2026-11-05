@@ -61,6 +61,7 @@ What it does not protect against: whoever controls the server machine controls t
      "OAuthClientSecret": "<client secret>",
      "HttpPrefix": "http://127.0.0.1:42421/",
      "PublicBaseUrl": "",
+     "RefusalDelaySeconds": 10,
      "TicketGraceSeconds": 60,
      "TicketLifetimeSeconds": 21600,
      "TicketSessionHours": 12,

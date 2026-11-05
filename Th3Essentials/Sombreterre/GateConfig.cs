@@ -40,6 +40,13 @@ public class GateConfig
     public int TicketGraceSeconds = 60;
 
     /// <summary>
+    /// How long after entering the world a player may be disconnected. Disconnecting a client within
+    /// about two seconds of that crashes it (TextureAtlasManager.RegenMipMaps), whoever does it. A
+    /// refused player waits out the rest of this, held on the spot.
+    /// </summary>
+    public int RefusalDelaySeconds = 10;
+
+    /// <summary>
     /// Keep the server's own whitelist in line with WhitelistRoleId: a player goes on it as soon as the
     /// launcher knows their game account and they hold the role, and comes off when they lose it.
     /// Entries for accounts no Discord account is tied to are left alone.

@@ -67,6 +67,9 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
     /// <summary>Players admitted this session, by UID. Cleared on disconnect, so every join is checked again.</summary>
     private readonly ConcurrentDictionary<string, bool> _admitted = new();
 
+    /// <summary>When each online player entered the world, by UID.</summary>
+    private readonly ConcurrentDictionary<string, DateTime> _enteredAt = new();
+
     /// <summary>Frozen players online, by UID, and the spot they are held on.</summary>
     private readonly ConcurrentDictionary<string, Vec3d> _heldAt = new();
 
@@ -126,6 +129,7 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
         {
             _admitted.TryRemove(player.PlayerUID, out _);
             _heldAt.TryRemove(player.PlayerUID, out _);
+            _enteredAt.TryRemove(player.PlayerUID, out _);
         };
         sapi.Event.RegisterGameTickListener(_ => HoldPlayersInPlace(), HoldCheckIntervalMs);
 
@@ -281,7 +285,7 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
             if (player?.ConnectionState is EnumClientState.Connected or EnumClientState.Playing)
             {
                 Audit($"{player.PlayerName} lost the whitelist on Discord and was disconnected.");
-                player.Disconnect(Lang.Get("th3essentials:gate-kick-role-lost"));
+                Kick(player, Lang.Get("th3essentials:gate-kick-role-lost"));
             }
         }, "sombreterregate-kick");
         return Task.CompletedTask;
@@ -326,13 +330,14 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
         }
         if (_admitted.ContainsKey(player.PlayerUID)) return;
 
+        _enteredAt[player.PlayerUID] = DateTime.UtcNow;
+        Freeze(player);
+
         if (_refusedUntil.TryGetValue(player.PlayerUID, out var until) && until > DateTime.UtcNow)
         {
-            player.Disconnect(Lang.Get("th3essentials:gate-kick-cooldown", Math.Ceiling((until - DateTime.UtcNow).TotalSeconds)));
+            Kick(player, Lang.Get("th3essentials:gate-kick-cooldown", Math.Ceiling((until - DateTime.UtcNow).TotalSeconds)));
             return;
         }
-
-        Freeze(player);
 
         // The ticket can still be on its way: the client sends it once its connection is ready.
         _sapi.Logger.Notification($"[SombreterreGate] Waiting up to {_config.TicketGraceSeconds}s for {player.PlayerName}'s launch ticket.");
@@ -356,7 +361,33 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
     {
         _refusedUntil[player.PlayerUID] = DateTime.UtcNow.AddSeconds(Math.Max(0, _config.RefusalCooldownSeconds));
         Audit($"Refused {player.PlayerName} ({player.PlayerUID}): {reason}.");
-        player.Disconnect(message);
+        Kick(player, message);
+    }
+
+    /// <summary>
+    /// Disconnects a player and tells them why. IServerPlayer.Disconnect(message) cannot do this: its
+    /// message goes to the other players, and the player leaving is told "unknown". Waits out
+    /// <see cref="GateConfig.RefusalDelaySeconds"/> if the player has only just entered the world.
+    /// </summary>
+    private void Kick(IServerPlayer player, string message)
+    {
+        var server = (ServerMain)_sapi.World;
+        var client = server.GetConnectedClient(player.PlayerUID);
+        if (client == null) return;
+
+        _enteredAt.TryGetValue(player.PlayerUID, out var enteredAt);
+        var wait = TimeSpan.FromSeconds(Math.Max(0, _config.RefusalDelaySeconds)) - (DateTime.UtcNow - enteredAt);
+        if (wait <= TimeSpan.Zero)
+        {
+            server.DisconnectPlayer(client, null, message);
+            return;
+        }
+
+        _sapi.Event.RegisterCallback(_ =>
+        {
+            // The same connection only: they may have left, and even come back, in the meantime.
+            if (server.GetConnectedClient(player.PlayerUID) == client) server.DisconnectPlayer(client, null, message);
+        }, (int)Math.Ceiling(wait.TotalMilliseconds));
     }
 
     /// <summary>
