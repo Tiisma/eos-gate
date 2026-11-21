@@ -29,7 +29,8 @@ namespace SombreterreGate.Client;
 /// AddButton itself does not work: the JIT inlines that small method into the recompiled Compose.)
 /// After the menu is composed, its background is replaced by the server's pictures, which then follow one
 /// another (see <see cref="MenuBackgrounds"/>): the menu's own draw of its background is rerouted to
-/// <see cref="MenuBackgrounds.Draw"/>, which fades from one picture to the next.
+/// <see cref="MenuBackgrounds.Draw"/>, which fades from one picture to the next, and its draw of the
+/// Vintage Story logo to <see cref="MenuLogo.Draw"/>, which puts the server's own logo there.
 ///
 /// The patches are applied once per game process and deliberately never removed: the menu is shown
 /// after the world (and this mod's systems) have been unloaded. The launcher applies them before the
@@ -132,6 +133,7 @@ internal static class MainMenuPatches
         try
         {
             if (ScreenManagerField.GetValue(__instance) is not ScreenManager screenManager) return;
+            MenuLogo.SetWindowHeight(screenManager.GamePlatform.WindowSize.Height);
             MenuBackgrounds.Tick(screenManager.api, () => BackgroundField.GetValue(__instance) as LoadedTexture, texture => BackgroundField.SetValue(__instance, texture));
         }
         catch (Exception e)
@@ -140,17 +142,16 @@ internal static class MainMenuPatches
         }
     }
 
-    /// <summary>The first Render2DTexture call in Render draws the background; the one after it, the logo, is left alone.</summary>
+    /// <summary>The first Render2DTexture call in Render draws the background, the second the logo.</summary>
     private static IEnumerable<CodeInstruction> RerouteBackgroundDraw(IEnumerable<CodeInstruction> instructions)
     {
-        var replacement = AccessTools.Method(typeof(MenuBackgrounds), nameof(MenuBackgrounds.Draw));
-        var done = false;
+        var replacements = new[] { AccessTools.Method(typeof(MenuBackgrounds), nameof(MenuBackgrounds.Draw)), AccessTools.Method(typeof(MenuLogo), nameof(MenuLogo.Draw)) };
+        var seen = 0;
         foreach (var instruction in instructions)
         {
-            if (!done && instruction.Calls(Render2DTextureMethod))
+            if (seen < replacements.Length && instruction.Calls(Render2DTextureMethod))
             {
-                done = true;
-                yield return new CodeInstruction(OpCodes.Call, replacement).MoveLabelsFrom(instruction).MoveBlocksFrom(instruction);
+                yield return new CodeInstruction(OpCodes.Call, replacements[seen++]).MoveLabelsFrom(instruction).MoveBlocksFrom(instruction);
                 continue;
             }
             yield return instruction;
@@ -256,5 +257,6 @@ internal static class MainMenuPatches
     {
         if (ScreenManagerField.GetValue(menu) is not ScreenManager screenManager) return;
         MenuBackgrounds.ShowFirst(screenManager.api, () => BackgroundField.GetValue(menu) as LoadedTexture, texture => BackgroundField.SetValue(menu, texture), _logger);
+        MenuLogo.Refresh(screenManager.api, _logger);
     }
 }

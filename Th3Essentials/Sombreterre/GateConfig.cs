@@ -47,6 +47,13 @@ public class GateConfig
     public string BackgroundsFolder = "SombreterreBackgrounds";
 
     /// <summary>
+    /// The title logo (.png, transparency kept) drawn in place of the Vintage Story one on players' main
+    /// menu, kept in step by the launcher like the backgrounds. Relative to the server data folder; when the
+    /// file is missing, players see the game's own logo.
+    /// </summary>
+    public string LogoFile = "SombreterreLogo.png";
+
+    /// <summary>
     /// The Optimum release players run, through the launcher: a version such as "0.4.2" (up or down from
     /// what they have), "latest" for each new release as it comes out, or empty for the version built into
     /// the launcher. Changed with /gate reloadpack; players get it on their next Play.

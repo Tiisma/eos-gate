@@ -502,8 +502,10 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
         }
         var backgrounds = string.IsNullOrWhiteSpace(_config.BackgroundsFolder) ? null
             : Path.IsPathRooted(_config.BackgroundsFolder) ? _config.BackgroundsFolder : Path.Combine(GamePaths.DataPath, _config.BackgroundsFolder);
-        var pack = PackBuilder.Build(_config.PackName, GameVersion.ShortGameVersion, folders, _config.ModDbModIds, optional, optimum, backgrounds);
-        _sapi.Logger.Notification($"[SombreterreGate] Pack: {pack.Backgrounds.Count} main menu background(s).");
+        var logo = string.IsNullOrWhiteSpace(_config.LogoFile) ? null
+            : Path.IsPathRooted(_config.LogoFile) ? _config.LogoFile : Path.Combine(GamePaths.DataPath, _config.LogoFile);
+        var pack = PackBuilder.Build(_config.PackName, GameVersion.ShortGameVersion, folders, _config.ModDbModIds, optional, optimum, backgrounds, logo);
+        _sapi.Logger.Notification($"[SombreterreGate] Pack: {pack.Backgrounds.Count} main menu background(s), {(pack.Logo == null ? "the game's own logo" : "the server's logo")}.");
         _sapi.Logger.Notification($"[SombreterreGate] Pack: Optimum {(optimum.Length == 0 ? "as built into the launcher" : optimum)}.");
         if (pack.OptionalModIds.Count > 0) _sapi.Logger.Notification($"[SombreterreGate] Pack: optional client mods {string.Join(", ", pack.OptionalModIds)}. With Stratum's ClientModPolicy on, list them in its AllowModIds.");
         foreach (var skipped in pack.Skipped) _sapi.Logger.Notification($"[SombreterreGate] Pack: skipped {skipped}");

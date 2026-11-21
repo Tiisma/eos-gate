@@ -201,6 +201,23 @@ public class SombreterreGateTests
     }
 
     [Fact]
+    public void TheLogoIsListedOnlyWhenItIsAPng()
+    {
+        var folder = Directory.CreateTempSubdirectory("gate-logo-").FullName;
+        var png = Path.Combine(folder, "SombreterreLogo.png");
+        File.WriteAllBytes(png, new byte[] { 1, 2 });
+        var pack = PackBuilder.Build("p", "1.22.7", Array.Empty<string>(), Array.Empty<string>(), null, "", null, png);
+        Assert.NotNull(JObject.Parse(pack.ManifestJson)["logo"]?["sha256"]);
+        Assert.NotNull(pack.Logo);
+
+        Assert.Null(JObject.Parse(PackBuilder.Build("p", "1.22.7", Array.Empty<string>(), Array.Empty<string>(), null, "", null, Path.Combine(folder, "missing.png")).ManifestJson)["logo"]);
+        var jpg = Path.Combine(folder, "logo.jpg");
+        File.WriteAllBytes(jpg, new byte[] { 1 });
+        Assert.Null(JObject.Parse(PackBuilder.Build("p", "1.22.7", Array.Empty<string>(), Array.Empty<string>(), null, "", null, jpg).ManifestJson)["logo"]);
+        Directory.Delete(folder, true);
+    }
+
+    [Fact]
     public void ClaimDoesNotOverrideALink()
     {
         var store = new GateStore(null);

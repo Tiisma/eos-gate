@@ -136,6 +136,8 @@ The **Play** button reads the server address from the ticket file the launcher w
 
 The menu also offers **Creative world**: one creative-mode world per player, created the first time, saved as `Saves/eos-creative.vcdbs`, played alone with the player's mods. No other world can be created or opened.
 
+**Logo from the server.** Put the project's title logo at `SombreterreLogo.png` (`LogoFile`) in the server's data folder, as a `.png` with a transparent background, then run `/gate reloadpack`. Players see it in place of the Vintage Story logo from their next Play, fitted to the top of the screen whatever its shape. Remove the file to bring the game's logo back.
+
 **Backgrounds from the server.** Put screenshots (`.png` or `.jpg`, 8 MB at most each, 100 at most) in `SombreterreBackgrounds/` (`BackgroundsFolder`) in the server's data folder, then run `/gate reloadpack`. The launcher brings every player's copy in line on their next Play, removals included, and the menu shows them one after another with a fade. The server log counts them at each pack rebuild. Without any there, the menu uses the pictures built into the client mod:
 
 1. Save them as PNG, 1920×1080 or larger, in `SombreterreGate.Client/assets/sombreterregate/textures/gui/backgrounds/`.
