@@ -500,7 +500,10 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
             _sapi.Logger.Error($"[SombreterreGate] OptimumVersion '{optimum}' is neither empty, 'latest' nor a version like 0.4.2; players keep the launcher's own.");
             optimum = "";
         }
-        var pack = PackBuilder.Build(_config.PackName, GameVersion.ShortGameVersion, folders, _config.ModDbModIds, optional, optimum);
+        var backgrounds = string.IsNullOrWhiteSpace(_config.BackgroundsFolder) ? null
+            : Path.IsPathRooted(_config.BackgroundsFolder) ? _config.BackgroundsFolder : Path.Combine(GamePaths.DataPath, _config.BackgroundsFolder);
+        var pack = PackBuilder.Build(_config.PackName, GameVersion.ShortGameVersion, folders, _config.ModDbModIds, optional, optimum, backgrounds);
+        _sapi.Logger.Notification($"[SombreterreGate] Pack: {pack.Backgrounds.Count} main menu background(s).");
         _sapi.Logger.Notification($"[SombreterreGate] Pack: Optimum {(optimum.Length == 0 ? "as built into the launcher" : optimum)}.");
         if (pack.OptionalModIds.Count > 0) _sapi.Logger.Notification($"[SombreterreGate] Pack: optional client mods {string.Join(", ", pack.OptionalModIds)}. With Stratum's ClientModPolicy on, list them in its AllowModIds.");
         foreach (var skipped in pack.Skipped) _sapi.Logger.Notification($"[SombreterreGate] Pack: skipped {skipped}");

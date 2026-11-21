@@ -182,6 +182,25 @@ public class SombreterreGateTests
     }
 
     [Fact]
+    public void BackgroundsAreListedWithTheirDigestAndOddFilesAreSkipped()
+    {
+        var folder = Directory.CreateTempSubdirectory("gate-bg-").FullName;
+        File.WriteAllBytes(Path.Combine(folder, "eos-01.png"), new byte[] { 1, 2, 3 });
+        File.WriteAllBytes(Path.Combine(folder, "Village au soir.jpg"), new byte[] { 4 });
+        File.WriteAllBytes(Path.Combine(folder, "notes.txt"), new byte[] { 5 });
+        File.WriteAllBytes(Path.Combine(folder, "empty.png"), Array.Empty<byte>());
+
+        var pack = PackBuilder.Build("p", "1.22.7", Array.Empty<string>(), Array.Empty<string>(), null, "", folder);
+        var listed = JObject.Parse(pack.ManifestJson)["backgrounds"]!.Select(b => b["file"]!.ToString()).ToList();
+
+        Assert.Equal(new[] { "eos-01.png", "Village au soir.jpg" }, listed);
+        Assert.True(pack.Backgrounds.ContainsKey("eos-01.png"));
+        Assert.Equal(2, pack.Skipped.Count(s => s.StartsWith("background")));
+        Assert.Null(JObject.Parse(PackBuilder.Build("p", "1.22.7", Array.Empty<string>(), Array.Empty<string>()).ManifestJson)["backgrounds"]);
+        Directory.Delete(folder, true);
+    }
+
+    [Fact]
     public void ClaimDoesNotOverrideALink()
     {
         var store = new GateStore(null);

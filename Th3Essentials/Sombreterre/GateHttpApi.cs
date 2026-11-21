@@ -26,6 +26,7 @@ namespace Th3Essentials.Sombreterre;
 ///   POST /api/logout                 (token) revokes it
 ///   GET  /api/pack.json              (token, whitelisted) the pack manifest
 ///   GET  /api/{file}.zip             (token, whitelisted) one private mod of that manifest
+///   GET  /api/backgrounds/{file}     (token, whitelisted) one main menu background of that manifest
 ///
 /// The launch flow never handles a Discord password or the OAuth client secret.
 ///
@@ -272,6 +273,21 @@ public class GateHttpApi : IDisposable
         {
             Write(response, 200, "application/json; charset=utf-8", Encoding.UTF8.GetBytes(_backend.Pack().ManifestJson));
             return;
+        }
+
+        if (method == "GET" && path.StartsWith("/api/backgrounds/", StringComparison.Ordinal))
+        {
+            // The same allowlist rule as the mods below.
+            var name = Uri.UnescapeDataString(path["/api/backgrounds/".Length..]);
+            if (_backend.Pack().Backgrounds.TryGetValue(name, out var file))
+            {
+                await using var stream = File.OpenRead(file.FullPath);
+                response.StatusCode = 200;
+                response.ContentType = name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "image/png" : "image/jpeg";
+                response.ContentLength64 = stream.Length;
+                await stream.CopyToAsync(response.OutputStream);
+                return;
+            }
         }
 
         if (method == "GET" && path.StartsWith("/api/", StringComparison.Ordinal) && path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))

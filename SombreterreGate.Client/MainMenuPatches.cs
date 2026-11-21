@@ -8,6 +8,7 @@ using HarmonyLib;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
+using Vintagestory.API.MathTools;
 using Vintagestory.Client;
 using Vintagestory.Client.NoObf;
 using Vintagestory.Common;
@@ -26,7 +27,9 @@ namespace SombreterreGate.Client;
 /// world, the ones the server does not offer are
 /// skipped, and the next button is moved up into the place a skipped one would have taken. (Patching
 /// AddButton itself does not work: the JIT inlines that small method into the recompiled Compose.)
-/// After the menu is composed, its background is swapped for one of this mod's, picked at random each time.
+/// After the menu is composed, its background is replaced by the server's pictures, which then follow one
+/// another (see <see cref="MenuBackgrounds"/>): the menu's own draw of its background is rerouted to
+/// <see cref="MenuBackgrounds.Draw"/>, which fades from one picture to the next.
 ///
 /// The patches are applied once per game process and deliberately never removed: the menu is shown
 /// after the world (and this mod's systems) have been unloaded. The launcher applies them before the
@@ -50,7 +53,10 @@ internal static class MainMenuPatches
     private static readonly MethodInfo? AddButtonMethod = AccessTools.Method(typeof(GuiComposerHelpers), nameof(GuiComposerHelpers.AddButton),
         new[] { typeof(GuiComposer), typeof(string), typeof(ActionConsumable), typeof(ElementBounds), typeof(CairoFont), typeof(EnumButtonStyle), typeof(string) });
 
-    private static readonly Random Random = new();
+    private static readonly MethodInfo? RenderMethod = AccessTools.Method(typeof(GuiCompositeMainMenuLeft), "Render", new[] { typeof(float), typeof(long), typeof(bool), typeof(bool) });
+    private static readonly MethodInfo? Render2DTextureMethod = AccessTools.Method(typeof(IRenderAPI), nameof(IRenderAPI.Render2DTexture),
+        new[] { typeof(int), typeof(float), typeof(float), typeof(float), typeof(float), typeof(float), typeof(Vec4f) });
+
     private static bool _applied;
     private static ILogger? _logger;
 
@@ -82,6 +88,9 @@ internal static class MainMenuPatches
                 transpiler: new HarmonyMethod(self, nameof(RerouteButtons)));
             harmony.Patch(AccessTools.Method(typeof(GuiCompositeMainMenuLeft), "updateButtonActiveFlag"),
                 prefix: new HarmonyMethod(self, nameof(SetActiveButton)));
+            if (RenderMethod != null && Render2DTextureMethod != null)
+                harmony.Patch(RenderMethod, prefix: new HarmonyMethod(self, nameof(BeforeRender)), transpiler: new HarmonyMethod(self, nameof(RerouteBackgroundDraw)));
+            else logger.Warning("[SombreterreGate] The main menu draws its background in a way this mod does not expect; the pictures will not follow one another.");
             _applied = true;
             logger.Notification("[SombreterreGate] Main menu trimmed to Play, the creative world, Settings and Quit.");
         }
@@ -115,6 +124,36 @@ internal static class MainMenuPatches
         catch (Exception e)
         {
             _logger?.Warning($"[SombreterreGate] Could not set the main menu background: {e.GetType().Name}");
+        }
+    }
+
+    private static void BeforeRender(GuiCompositeMainMenuLeft __instance)
+    {
+        try
+        {
+            if (ScreenManagerField.GetValue(__instance) is not ScreenManager screenManager) return;
+            MenuBackgrounds.Tick(screenManager.api, () => BackgroundField.GetValue(__instance) as LoadedTexture, texture => BackgroundField.SetValue(__instance, texture));
+        }
+        catch (Exception e)
+        {
+            _logger?.Warning($"[SombreterreGate] Could not change the main menu background: {e.GetType().Name}");
+        }
+    }
+
+    /// <summary>The first Render2DTexture call in Render draws the background; the one after it, the logo, is left alone.</summary>
+    private static IEnumerable<CodeInstruction> RerouteBackgroundDraw(IEnumerable<CodeInstruction> instructions)
+    {
+        var replacement = AccessTools.Method(typeof(MenuBackgrounds), nameof(MenuBackgrounds.Draw));
+        var done = false;
+        foreach (var instruction in instructions)
+        {
+            if (!done && instruction.Calls(Render2DTextureMethod))
+            {
+                done = true;
+                yield return new CodeInstruction(OpCodes.Call, replacement).MoveLabelsFrom(instruction).MoveBlocksFrom(instruction);
+                continue;
+            }
+            yield return instruction;
         }
     }
 
@@ -215,23 +254,7 @@ internal static class MainMenuPatches
 
     private static void ReplaceBackground(GuiCompositeMainMenuLeft menu)
     {
-        if (GateSession.Backgrounds.Count == 0) return;
         if (ScreenManagerField.GetValue(menu) is not ScreenManager screenManager) return;
-        var api = screenManager.api;
-
-        var png = GateSession.Backgrounds[Random.Next(GateSession.Backgrounds.Count)];
-        var bitmap = api.Render.BitmapCreateFromPng(png);
-        try
-        {
-            var texture = new LoadedTexture(api);
-            api.Render.LoadTexture(bitmap, ref texture, linearMag: true);
-            var previous = BackgroundField.GetValue(menu) as LoadedTexture;
-            BackgroundField.SetValue(menu, texture);
-            previous?.Dispose();
-        }
-        finally
-        {
-            bitmap.Dispose();
-        }
+        MenuBackgrounds.ShowFirst(screenManager.api, () => BackgroundField.GetValue(menu) as LoadedTexture, texture => BackgroundField.SetValue(menu, texture), _logger);
     }
 }

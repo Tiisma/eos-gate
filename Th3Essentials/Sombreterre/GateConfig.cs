@@ -40,6 +40,13 @@ public class GateConfig
     public int TicketGraceSeconds = 60;
 
     /// <summary>
+    /// Folder of main menu backgrounds (.png or .jpg) the launcher keeps in step on every player's machine,
+    /// so pictures are added or removed with /gate reloadpack alone. Relative paths are resolved from the
+    /// server data folder.
+    /// </summary>
+    public string BackgroundsFolder = "SombreterreBackgrounds";
+
+    /// <summary>
     /// The Optimum release players run, through the launcher: a version such as "0.4.2" (up or down from
     /// what they have), "latest" for each new release as it comes out, or empty for the version built into
     /// the launcher. Changed with /gate reloadpack; players get it on their next Play.

@@ -19,6 +19,7 @@
     <ItemGroup>
         <Compile Include="..\SombreterreGate.Client\MainMenuPatches.cs" Link="MainMenuPatches.cs" />
         <Compile Include="..\SombreterreGate.Client\GateSession.cs" Link="GateSession.cs" />
+        <Compile Include="..\SombreterreGate.Client\MenuBackgrounds.cs" Link="MenuBackgrounds.cs" />
     </ItemGroup>
 
     <ItemGroup>

@@ -92,6 +92,24 @@ public class SombreterreGateHttpTests : IDisposable
     }
 
     [Fact]
+    public async Task BackgroundsAreServedByTheNameTheManifestListsOnly()
+    {
+        var folder = Directory.CreateTempSubdirectory("gate-http-bg-").FullName;
+        File.WriteAllBytes(Path.Combine(folder, "eos-01.png"), new byte[] { 9, 8, 7 });
+        _backend.PackResult = PackBuilder.Build("Sombreterre", "1.22.7", new[] { _folder }, Array.Empty<string>(), null, "", folder);
+        var token = _store.IssueToken(42UL, "alice", DateTime.UtcNow);
+
+        var served = await _http.SendAsync(Authed(HttpMethod.Get, "api/backgrounds/eos-01.png", token));
+        Assert.Equal(HttpStatusCode.OK, served.StatusCode);
+        Assert.Equal("image/png", served.Content.Headers.ContentType!.MediaType);
+        Assert.Equal(new byte[] { 9, 8, 7 }, await served.Content.ReadAsByteArrayAsync());
+
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.SendAsync(Authed(HttpMethod.Get, "api/backgrounds/..%2Fcore.zip", token))).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await _http.GetAsync("api/backgrounds/eos-01.png")).StatusCode);
+        Directory.Delete(folder, true);
+    }
+
+    [Fact]
     public async Task TicketRequestRecordsTheGameAccountAndSyncsTheWhitelist()
     {
         var token = _store.IssueToken(42UL, "alice", DateTime.UtcNow);

@@ -33,6 +33,9 @@ public class PackBuilder
         public Dictionary<string, PrivateFile> PrivateFiles = new(StringComparer.OrdinalIgnoreCase);
         public List<string> Skipped = new();
         public List<string> OptionalModIds = new();
+
+        /// <summary>Main menu backgrounds served by name, like <see cref="PrivateFiles"/>.</summary>
+        public Dictionary<string, PrivateFile> Backgrounds = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private static readonly Regex ModIdPattern = new("^[a-z0-9_-]{1,64}$", RegexOptions.IgnoreCase);
@@ -44,7 +47,13 @@ public class PackBuilder
     /// <summary>True for a value <see cref="GateConfig.OptimumVersion"/> may hold: empty, "latest", or a plain three-part version.</summary>
     public static bool IsOptimumVersion(string value) => value.Length == 0 || OptimumVersionPattern.IsMatch(value);
 
-    public static Result Build(string packName, string gameVersion, IEnumerable<string> folders, ICollection<string> modDbModIds, IEnumerable<string>? optionalFolders = null, string optimumVersion = "")
+    /// <summary>Most backgrounds one pack lists, and the largest one it accepts, so a folder dropped there by mistake cannot slow every launch.</summary>
+    public const int MaxBackgrounds = 100;
+    public const long MaxBackgroundBytes = 8 * 1024 * 1024;
+
+    private static readonly Regex BackgroundNamePattern = new("^[A-Za-z0-9][A-Za-z0-9 _.()-]{0,99}\\.(png|jpe?g)$", RegexOptions.IgnoreCase);
+
+    public static Result Build(string packName, string gameVersion, IEnumerable<string> folders, ICollection<string> modDbModIds, IEnumerable<string>? optionalFolders = null, string optimumVersion = "", string? backgroundsFolder = null)
     {
         var result = new Result();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -62,6 +71,8 @@ public class PackBuilder
             ["optional"] = JArray.FromObject(optional)
         };
         if (optimumVersion.Length > 0 && IsOptimumVersion(optimumVersion)) manifest["optimum"] = optimumVersion;
+        var backgrounds = CollectBackgrounds(result, backgroundsFolder);
+        if (backgrounds.Count > 0) manifest["backgrounds"] = backgrounds;
         result.ManifestJson = manifest.ToString(Formatting.Indented);
         return result;
     }
@@ -120,6 +131,34 @@ public class PackBuilder
             }
         }
         return entries;
+    }
+
+    private static JArray CollectBackgrounds(Result result, string? folder)
+    {
+        var list = new JArray();
+        if (folder == null || !Directory.Exists(folder)) return list;
+        foreach (var path in Directory.EnumerateFiles(folder).OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+        {
+            var name = Path.GetFileName(path);
+            if (!BackgroundNamePattern.IsMatch(name) || name.Contains(".."))
+            {
+                result.Skipped.Add($"background {name}: not a .png or .jpg with a plain name");
+                continue;
+            }
+            if (new FileInfo(path).Length is 0 or > MaxBackgroundBytes)
+            {
+                result.Skipped.Add($"background {name}: empty or over {MaxBackgroundBytes / 1024 / 1024} MB");
+                continue;
+            }
+            if (result.Backgrounds.Count >= MaxBackgrounds)
+            {
+                result.Skipped.Add($"background {name}: more than {MaxBackgrounds} backgrounds");
+                continue;
+            }
+            list.Add(new JObject { ["file"] = name, ["sha256"] = Sha256(path) });
+            result.Backgrounds[name] = new PrivateFile { FileName = name, FullPath = path };
+        }
+        return list;
     }
 
     /// <summary>What a player reads about an optional mod before choosing it.</summary>
