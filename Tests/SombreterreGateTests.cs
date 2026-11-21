@@ -170,6 +170,18 @@ public class SombreterreGateTests
     }
 
     [Fact]
+    public void TheManifestNamesTheOptimumVersionOnlyWhenOneIsSet()
+    {
+        var folder = Directory.CreateTempSubdirectory("gate-optimum-").FullName;
+        Assert.Null(JObject.Parse(PackBuilder.Build("p", "1.22.7", new[] { folder }, Array.Empty<string>()).ManifestJson)["optimum"]);
+        Assert.Equal("0.4.2", JObject.Parse(PackBuilder.Build("p", "1.22.7", new[] { folder }, Array.Empty<string>(), null, "0.4.2").ManifestJson)["optimum"]!.ToString());
+        Assert.Equal("latest", JObject.Parse(PackBuilder.Build("p", "1.22.7", new[] { folder }, Array.Empty<string>(), null, "latest").ManifestJson)["optimum"]!.ToString());
+        Assert.Null(JObject.Parse(PackBuilder.Build("p", "1.22.7", new[] { folder }, Array.Empty<string>(), null, "v0.4").ManifestJson)["optimum"]);
+        Assert.False(PackBuilder.IsOptimumVersion("0.4"));
+        Directory.Delete(folder, true);
+    }
+
+    [Fact]
     public void ClaimDoesNotOverrideALink()
     {
         var store = new GateStore(null);

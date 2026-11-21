@@ -40,6 +40,13 @@ public class GateConfig
     public int TicketGraceSeconds = 60;
 
     /// <summary>
+    /// The Optimum release players run, through the launcher: a version such as "0.4.2" (up or down from
+    /// what they have), "latest" for each new release as it comes out, or empty for the version built into
+    /// the launcher. Changed with /gate reloadpack; players get it on their next Play.
+    /// </summary>
+    public string OptimumVersion = "";
+
+    /// <summary>
     /// How long after entering the world a player may be disconnected. Disconnecting a client within
     /// about two seconds of that crashes it (TextureAtlasManager.RegenMipMaps), whoever does it. A
     /// refused player waits out the rest of this, held on the spot.

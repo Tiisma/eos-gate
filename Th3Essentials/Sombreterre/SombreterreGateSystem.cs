@@ -494,7 +494,14 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
             .Concat(_config.AdditionalPackFolders.Select(f => Path.IsPathRooted(f) ? f : Path.Combine(GamePaths.DataPath, f)))
             .ToList();
         var optional = _config.OptionalPackFolders.Select(f => Path.IsPathRooted(f) ? f : Path.Combine(GamePaths.DataPath, f)).ToList();
-        var pack = PackBuilder.Build(_config.PackName, GameVersion.ShortGameVersion, folders, _config.ModDbModIds, optional);
+        var optimum = _config.OptimumVersion.Trim();
+        if (!PackBuilder.IsOptimumVersion(optimum))
+        {
+            _sapi.Logger.Error($"[SombreterreGate] OptimumVersion '{optimum}' is neither empty, 'latest' nor a version like 0.4.2; players keep the launcher's own.");
+            optimum = "";
+        }
+        var pack = PackBuilder.Build(_config.PackName, GameVersion.ShortGameVersion, folders, _config.ModDbModIds, optional, optimum);
+        _sapi.Logger.Notification($"[SombreterreGate] Pack: Optimum {(optimum.Length == 0 ? "as built into the launcher" : optimum)}.");
         if (pack.OptionalModIds.Count > 0) _sapi.Logger.Notification($"[SombreterreGate] Pack: optional client mods {string.Join(", ", pack.OptionalModIds)}. With Stratum's ClientModPolicy on, list them in its AllowModIds.");
         foreach (var skipped in pack.Skipped) _sapi.Logger.Notification($"[SombreterreGate] Pack: skipped {skipped}");
         lock (_packLock) _pack = pack;

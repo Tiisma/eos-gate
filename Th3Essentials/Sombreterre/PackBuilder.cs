@@ -39,7 +39,12 @@ public class PackBuilder
     private static readonly Regex VersionPattern = new("^[0-9A-Za-z.+-]{1,64}$");
     private static readonly Regex FileNamePattern = new("^[^\\\\/:*?\"<>|]{1,195}\\.zip$", RegexOptions.IgnoreCase);
 
-    public static Result Build(string packName, string gameVersion, IEnumerable<string> folders, ICollection<string> modDbModIds, IEnumerable<string>? optionalFolders = null)
+    private static readonly Regex OptimumVersionPattern = new("^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$");
+
+    /// <summary>True for a value <see cref="GateConfig.OptimumVersion"/> may hold: empty, "latest", or a plain three-part version.</summary>
+    public static bool IsOptimumVersion(string value) => value.Length == 0 || OptimumVersionPattern.IsMatch(value);
+
+    public static Result Build(string packName, string gameVersion, IEnumerable<string> folders, ICollection<string> modDbModIds, IEnumerable<string>? optionalFolders = null, string optimumVersion = "")
     {
         var result = new Result();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -48,7 +53,16 @@ public class PackBuilder
         var entries = Collect(result, folders, seen, moddb, false);
         var optional = Collect(result, optionalFolders ?? Array.Empty<string>(), seen, moddb, true);
 
-        result.ManifestJson = JsonConvert.SerializeObject(new { format = 1, name = packName, gameVersion, mods = entries, optional }, Formatting.Indented);
+        var manifest = new JObject
+        {
+            ["format"] = 1,
+            ["name"] = packName,
+            ["gameVersion"] = gameVersion,
+            ["mods"] = JArray.FromObject(entries),
+            ["optional"] = JArray.FromObject(optional)
+        };
+        if (optimumVersion.Length > 0 && IsOptimumVersion(optimumVersion)) manifest["optimum"] = optimumVersion;
+        result.ManifestJson = manifest.ToString(Formatting.Indented);
         return result;
     }
 

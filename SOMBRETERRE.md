@@ -110,6 +110,16 @@ The server's own whitelist (`WhitelistMode`) should stay on: it stops anyone wit
 - Entries for accounts no Discord account is tied to are never touched, nor are `BypassPlayerUids`, so staff can keep their own. An entry with the same name under another game account is left as it is and reported in the admin log.
 - The account a launcher names is not proven until it joins with a ticket. A false one only puts that account on the whitelist; without a ticket the gate still turns it away. Set `MinLauncherVersion` to 0.1.6 so that every launcher names its account.
 
+## Optimum version
+
+`OptimumVersion` in `SombreterreGate.json` decides which Optimum release players run:
+
+- `"0.4.2"` (any version): players are moved to exactly that release on their next Play, up or down from the one they have. Use it to go back to a release that worked.
+- `"latest"`: each new Optimum release reaches players on their next Play. A release that breaks something reaches them too: set a version to go back.
+- `""` (default): the version built into the launcher.
+
+After changing it, run `/gate reloadpack`; the server log names the version in effect. The launcher checks at most every few minutes, and plays the installed build as it is when it cannot reach the server or GitHub, or when Optimum has not published the files it needs for that release.
+
 ## Optional client mods
 
 Mods a player may choose to add, shaders for instance, go in `SombreterrePackOptional/` (`OptionalPackFolders`) in the server's data folder. After `/gate reloadpack`, they appear in the launcher under **Optional mods**, with the name and description from their `modinfo.json`.
