@@ -47,6 +47,13 @@ public class GateConfig
     public string BackgroundsFolder = "SombreterreBackgrounds";
 
     /// <summary>
+    /// Folder of main menu texts: tips.txt (one tip per line, shown in turn at the bottom of the menu) and
+    /// panel.txt (the panel on the right, in the game's rich text), each optionally per language
+    /// (tips.fr.txt, panel.en.txt). Kept in step by the launcher; relative to the server data folder.
+    /// </summary>
+    public string MenuFolder = "SombreterreMenu";
+
+    /// <summary>
     /// The title logo (.png, transparency kept) drawn in place of the Vintage Story one on players' main
     /// menu, kept in step by the launcher like the backgrounds. Relative to the server data folder; when the
     /// file is missing, players see the game's own logo.

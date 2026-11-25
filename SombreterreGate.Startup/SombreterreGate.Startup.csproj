@@ -21,6 +21,7 @@
         <Compile Include="..\SombreterreGate.Client\GateSession.cs" Link="GateSession.cs" />
         <Compile Include="..\SombreterreGate.Client\MenuBackgrounds.cs" Link="MenuBackgrounds.cs" />
         <Compile Include="..\SombreterreGate.Client\MenuLogo.cs" Link="MenuLogo.cs" />
+        <Compile Include="..\SombreterreGate.Client\MenuTexts.cs" Link="MenuTexts.cs" />
     </ItemGroup>
 
     <ItemGroup>

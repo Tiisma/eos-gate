@@ -28,6 +28,7 @@ namespace Th3Essentials.Sombreterre;
 ///   GET  /api/{file}.zip             (token, whitelisted) one private mod of that manifest
 ///   GET  /api/backgrounds/{file}     (token, whitelisted) one main menu background of that manifest
 ///   GET  /api/logo.png               (token, whitelisted) the main menu logo of that manifest
+///   GET  /api/menu/{file}            (token, whitelisted) one main menu text (tips, panel) of that manifest
 ///
 /// The launch flow never handles a Discord password or the OAuth client secret.
 ///
@@ -284,6 +285,16 @@ public class GateHttpApi : IDisposable
             response.ContentLength64 = stream.Length;
             await stream.CopyToAsync(response.OutputStream);
             return;
+        }
+
+        if (method == "GET" && path.StartsWith("/api/menu/", StringComparison.Ordinal))
+        {
+            var name = Uri.UnescapeDataString(path["/api/menu/".Length..]);
+            if (_backend.Pack().MenuFiles.TryGetValue(name, out var file))
+            {
+                Write(response, 200, "text/plain; charset=utf-8", await File.ReadAllBytesAsync(file.FullPath));
+                return;
+            }
         }
 
         if (method == "GET" && path.StartsWith("/api/backgrounds/", StringComparison.Ordinal))

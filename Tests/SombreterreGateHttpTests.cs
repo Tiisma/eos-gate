@@ -92,6 +92,22 @@ public class SombreterreGateHttpTests : IDisposable
     }
 
     [Fact]
+    public async Task MenuTextsAreServedByTheNameTheManifestListsOnly()
+    {
+        var folder = Directory.CreateTempSubdirectory("gate-http-menu-").FullName;
+        File.WriteAllText(Path.Combine(folder, "tips.txt"), "Look up.");
+        _backend.PackResult = PackBuilder.Build("Sombreterre", "1.22.7", new[] { _folder }, Array.Empty<string>(), null, "", null, null, folder);
+        var token = _store.IssueToken(42UL, "alice", DateTime.UtcNow);
+
+        var served = await _http.SendAsync(Authed(HttpMethod.Get, "api/menu/tips.txt", token));
+        Assert.Equal(HttpStatusCode.OK, served.StatusCode);
+        Assert.Equal("Look up.", await served.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.SendAsync(Authed(HttpMethod.Get, "api/menu/..%2Ftips.txt", token))).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await _http.GetAsync("api/menu/tips.txt")).StatusCode);
+        Directory.Delete(folder, true);
+    }
+
+    [Fact]
     public async Task BackgroundsAreServedByTheNameTheManifestListsOnly()
     {
         var folder = Directory.CreateTempSubdirectory("gate-http-bg-").FullName;

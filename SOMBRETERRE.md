@@ -136,6 +136,12 @@ The **Play** button reads the server address from the ticket file the launcher w
 
 The menu also offers **Creative world**: one creative-mode world per player, created the first time, saved as `Saves/eos-creative.vcdbs`, played alone with the player's mods. No other world can be created or opened.
 
+**Menu layout and texts from the server.** The client mod replaces the game's left bar with a column of buttons in the middle of the screen (Play, Creative world, Settings, Quit) and removes the account links and version text at the bottom left. Its texts come from `SombreterreMenu/` (`MenuFolder`) in the server's data folder, after `/gate reloadpack`:
+
+- `tips.txt`: one tip per line, shown in turn at the bottom of the menu, a new one every 15 seconds. Empty lines and lines starting with `#` are skipped.
+- `panel.txt`: the panel on the right, in the game's rich text (`<strong>`, `<i>`, `<font color="#c8a060">`, `<br>`, `<a href="https://...">link</a>`). Without it there is no panel. Only `https://` links open.
+- Either may come per language, `tips.fr.txt` or `panel.en.txt` for instance: the player's game language is used first, then the plain file. 64 KB at most each.
+
 **Logo from the server.** Put the project's title logo at `SombreterreLogo.png` (`LogoFile`) in the server's data folder, as a `.png` with a transparent background, then run `/gate reloadpack`. Players see it in place of the Vintage Story logo from their next Play, fitted to the top of the screen whatever its shape. Remove the file to bring the game's logo back.
 
 **Backgrounds from the server.** Put screenshots (`.png` or `.jpg`, 8 MB at most each, 100 at most) in `SombreterreBackgrounds/` (`BackgroundsFolder`) in the server's data folder, then run `/gate reloadpack`. The launcher brings every player's copy in line on their next Play, removals included, and the menu shows them one after another with a fade. The server log counts them at each pack rebuild. Without any there, the menu uses the pictures built into the client mod:

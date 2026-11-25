@@ -32,6 +32,11 @@ namespace SombreterreGate.Client;
 /// <see cref="MenuBackgrounds.Draw"/>, which fades from one picture to the next, and its draw of the
 /// Vintage Story logo to <see cref="MenuLogo.Draw"/>, which puts the server's own logo there.
 ///
+/// The game's left bar (wood plank, tree, account links, update notice) is then replaced by a column of
+/// buttons in the middle of the screen, shown on the main screen only. On that screen the quote at the
+/// bottom becomes the server's tips, larger, centred and in turn, and the welcome panel on the right the
+/// server's own panel, or nothing (see <see cref="MenuTexts"/>).
+///
 /// The patches are applied once per game process and deliberately never removed: the menu is shown
 /// after the world (and this mod's systems) have been unloaded. The launcher applies them before the
 /// game's first menu, through SombreterreGate.Startup; the mod applies them on joining otherwise.
@@ -57,6 +62,18 @@ internal static class MainMenuPatches
     private static readonly MethodInfo? RenderMethod = AccessTools.Method(typeof(GuiCompositeMainMenuLeft), "Render", new[] { typeof(float), typeof(long), typeof(bool), typeof(bool) });
     private static readonly MethodInfo? Render2DTextureMethod = AccessTools.Method(typeof(IRenderAPI), nameof(IRenderAPI.Render2DTexture),
         new[] { typeof(int), typeof(float), typeof(float), typeof(float), typeof(float), typeof(float), typeof(Vec4f) });
+    private static readonly MethodInfo? Render2DPremultipliedMethod = AccessTools.Method(typeof(IRenderAPI), nameof(IRenderAPI.Render2DTexturePremultipliedAlpha),
+        new[] { typeof(int), typeof(double), typeof(double), typeof(double), typeof(double), typeof(float), typeof(Vec4f) });
+
+    private static readonly FieldInfo? SidebarField = AccessTools.Field(typeof(GuiCompositeMainMenuLeft), "sidebarBounds");
+    private static readonly MethodInfo? OnSettingsMethod = AccessTools.Method(typeof(GuiCompositeMainMenuLeft), "OnSettings");
+    private static readonly FieldInfo? CurrentScreenField = AccessTools.Field(typeof(ScreenManager), "CurrentScreen");
+    private static readonly FieldInfo? QuoteTextureField = AccessTools.Field(typeof(GuiScreenMainRight), "quoteTexture");
+    private static readonly FieldInfo? GrayBgField = AccessTools.Field(typeof(GuiScreenMainRight), "grayBg");
+
+    /// <summary>Width of a centred button and the gap between two, at a GUI scale of 1.</summary>
+    private const double ButtonWidth = 340;
+    private const double ButtonGap = 14;
 
     private static bool _applied;
     private static ILogger? _logger;
@@ -89,6 +106,18 @@ internal static class MainMenuPatches
                 transpiler: new HarmonyMethod(self, nameof(RerouteButtons)));
             harmony.Patch(AccessTools.Method(typeof(GuiCompositeMainMenuLeft), "updateButtonActiveFlag"),
                 prefix: new HarmonyMethod(self, nameof(SetActiveButton)));
+            if (SidebarField != null && OnSettingsMethod != null && CurrentScreenField != null)
+            {
+                harmony.Patch(AccessTools.Method(typeof(ScreenManager), "RenderMainMenuParts"), prefix: new HarmonyMethod(self, nameof(MainMenuOnMainScreenOnly)));
+                foreach (var name in new[] { "OnMouseDown", "OnMouseUp", "OnMouseMove" })
+                    harmony.Patch(AccessTools.Method(typeof(GuiCompositeMainMenuLeft), name), prefix: new HarmonyMethod(self, nameof(MenuInputOnMainScreenOnly)));
+            }
+            if (QuoteTextureField != null && GrayBgField != null && Render2DPremultipliedMethod != null)
+            {
+                harmony.Patch(AccessTools.Method(typeof(GuiScreenMainRight), "getQuote"), prefix: new HarmonyMethod(self, nameof(ServerTip)));
+                harmony.Patch(AccessTools.Method(typeof(GuiScreenMainRight), nameof(GuiScreenMainRight.Compose)), postfix: new HarmonyMethod(self, nameof(AfterMainScreenCompose)));
+                harmony.Patch(AccessTools.Method(typeof(GuiScreenMainRight), nameof(GuiScreenMainRight.Render)), prefix: new HarmonyMethod(self, nameof(BeforeMainScreenRender)), transpiler: new HarmonyMethod(self, nameof(RerouteQuoteDraw)));
+            }
             if (RenderMethod != null && Render2DTextureMethod != null)
                 harmony.Patch(RenderMethod, prefix: new HarmonyMethod(self, nameof(BeforeRender)), transpiler: new HarmonyMethod(self, nameof(RerouteBackgroundDraw)));
             else logger.Warning("[SombreterreGate] The main menu draws its background in a way this mod does not expect; the pictures will not follow one another.");
@@ -134,6 +163,8 @@ internal static class MainMenuPatches
         {
             if (ScreenManagerField.GetValue(__instance) is not ScreenManager screenManager) return;
             MenuLogo.SetWindowHeight(screenManager.GamePlatform.WindowSize.Height);
+            MenuTexts.SetWindowWidth(screenManager.GamePlatform.WindowSize.Width);
+            MenuLogo.SetWindowWidth(screenManager.GamePlatform.WindowSize.Width);
             MenuBackgrounds.Tick(screenManager.api, () => BackgroundField.GetValue(__instance) as LoadedTexture, texture => BackgroundField.SetValue(__instance, texture));
         }
         catch (Exception e)
@@ -258,5 +289,148 @@ internal static class MainMenuPatches
         if (ScreenManagerField.GetValue(menu) is not ScreenManager screenManager) return;
         MenuBackgrounds.ShowFirst(screenManager.api, () => BackgroundField.GetValue(menu) as LoadedTexture, texture => BackgroundField.SetValue(menu, texture), _logger);
         MenuLogo.Refresh(screenManager.api, _logger);
+        CentreButtons(menu, screenManager);
+    }
+
+    private static bool OnMainScreen(ScreenManager screenManager) => CurrentScreenField?.GetValue(screenManager) is GuiScreenMainRight;
+
+    /// <summary>
+    /// Puts the game's composed menu aside for a column of buttons in the middle of the screen, under the
+    /// logo, with the same keys so the rest of the game (and <see cref="SetActiveButton"/>) still finds them.
+    /// The bar's width drops to nothing, so what the game places from it (logo, tips) recentres itself.
+    /// </summary>
+    private static void CentreButtons(GuiCompositeMainMenuLeft menu, ScreenManager screenManager)
+    {
+        if (SidebarField == null || OnSettingsMethod == null) return;
+        try
+        {
+            var buttons = new List<(string Key, string Text, ActionConsumable OnClick)>();
+            if (GateSession.Server != null)
+            {
+                var server = GateSession.Server;
+                buttons.Add(("singleplayer", French ? "Jouer" : "Play", () =>
+                {
+                    screenManager.ConnectToMultiplayer(server, null);
+                    return true;
+                }));
+            }
+            if (VerifiedModsField != null) buttons.Add(("multiplayer", French ? "Monde créatif" : "Creative world", () => OpenCreativeWorld(screenManager)));
+            buttons.Add(("settings", Lang.Get("mainmenu-settings"), () => (bool)OnSettingsMethod.Invoke(menu, null)!));
+            buttons.Add(("quit", Lang.Get("mainmenu-quit"), menu.OnQuit));
+
+            var scale = GuiElement.scaled(1);
+            var top = screenManager.GamePlatform.WindowSize.Height * 0.42 / scale;
+            var font = CairoFont.ButtonText().WithFontSize(24);
+            const double height = 52;
+
+            var composer = ScreenManager.GuiComposers.Create("compositemainmenu", ElementBounds.Fill).BeginChildElements();
+            for (var i = 0; i < buttons.Count; i++)
+            {
+                var bounds = ElementBounds.Fixed(EnumDialogArea.CenterTop, 0, top + i * (height + ButtonGap), ButtonWidth, height);
+                composer.AddButton(buttons[i].Text, buttons[i].OnClick, bounds, font, EnumButtonStyle.Normal, buttons[i].Key);
+            }
+
+            (ComposerField.GetValue(screenManager) as GuiComposer)?.Dispose();
+            ComposerField.SetValue(screenManager, composer.EndChildElements().Compose());
+            SidebarField.SetValue(menu, ElementBounds.Fixed(0, 0, 0, 0));
+        }
+        catch (Exception e)
+        {
+            _logger?.Warning($"[SombreterreGate] Could not centre the main menu buttons, keeping the bar: {e.GetType().Name}");
+        }
+    }
+
+    /// <summary>The centred buttons belong to the main screen: on the others (settings...) they would cover the page.</summary>
+    private static void MainMenuOnMainScreenOnly(ScreenManager __instance, ref bool withMainMenu)
+    {
+        if (!OnMainScreen(__instance)) withMainMenu = false;
+    }
+
+    private static bool MenuInputOnMainScreenOnly(GuiCompositeMainMenuLeft __instance)
+    {
+        return ScreenManagerField.GetValue(__instance) is not ScreenManager screenManager || OnMainScreen(screenManager);
+    }
+
+    private static bool ServerTip(ref string __result)
+    {
+        if (!MenuTexts.LoadTips()) return true;
+        __result = MenuTexts.NextTip()!;
+        return false;
+    }
+
+    /// <summary>Makes the tip larger over a darker band, and puts the server's panel (or none) in place of the welcome one.</summary>
+    private static void AfterMainScreenCompose(GuiScreenMainRight __instance)
+    {
+        try
+        {
+            var api = __instance.ScreenManager.api;
+            var band = GrayBgField!.GetValue(__instance) as LoadedTexture ?? new LoadedTexture(api);
+            MenuTexts.TipBand(api, ref band);
+            GrayBgField.SetValue(__instance, band);
+
+            var quote = AccessTools.Field(typeof(GuiScreenMainRight), "quote").GetValue(__instance) as string;
+            if (!string.IsNullOrEmpty(quote)) SetTip(__instance, api, quote);
+
+            ReplacePanel(__instance);
+        }
+        catch (Exception e)
+        {
+            _logger?.Warning($"[SombreterreGate] Could not set the main menu texts: {e.GetType().Name}");
+        }
+    }
+
+    private static void BeforeMainScreenRender(GuiScreenMainRight __instance)
+    {
+        if (!MenuTexts.TipDue) return;
+        var tip = MenuTexts.NextTip();
+        if (tip != null) SetTip(__instance, __instance.ScreenManager.api, tip);
+    }
+
+    private static void SetTip(GuiScreenMainRight screen, ICoreClientAPI api, string tip)
+    {
+        var previous = QuoteTextureField!.GetValue(screen) as LoadedTexture;
+        QuoteTextureField.SetValue(screen, MenuTexts.TipTexture(api, tip));
+        previous?.Dispose();
+    }
+
+    private static void ReplacePanel(GuiScreenMainRight screen)
+    {
+        var text = MenuTexts.Read("panel");
+        var bounds = ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.RightBottom).WithFixedAlignmentOffset(-50, -50);
+        var composer = ScreenManager.GuiComposers.Create("welcomedialog", bounds);
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            var textBounds = ElementBounds.Fixed(0, 0, 450, 500);
+            var font = CairoFont.WhiteDetailText().WithFontSize(16).WithLineHeightMultiplier(1.15);
+            composer = composer
+                .AddShadedDialogBG(ElementStdBounds.DialogBackground().WithFixedPadding(GuiStyle.ElementToDialogPadding, GuiStyle.ElementToDialogPadding), false, 5, 0.8f)
+                .BeginChildElements(bounds)
+                .AddRichtext(text, font, textBounds, MenuTexts.OpenLink, "panel")
+                .EndChildElements();
+            composer.Compose();
+            var richtext = composer.GetRichtext("panel");
+            textBounds.fixedHeight = richtext.TotalHeight / GuiElement.scaled(1) + 5;
+            composer.ReCompose();
+        }
+        else composer.Compose();
+
+        screen.ElementComposer?.Dispose();
+        screen.ElementComposer = composer;
+    }
+
+    /// <summary>The second premultiplied draw in the main screen's Render is the quote; the first, its band, stays.</summary>
+    private static IEnumerable<CodeInstruction> RerouteQuoteDraw(IEnumerable<CodeInstruction> instructions)
+    {
+        var replacement = AccessTools.Method(typeof(MenuTexts), nameof(MenuTexts.DrawTip));
+        var seen = 0;
+        foreach (var instruction in instructions)
+        {
+            if (instruction.Calls(Render2DPremultipliedMethod) && ++seen == 2)
+            {
+                yield return new CodeInstruction(OpCodes.Call, replacement).MoveLabelsFrom(instruction).MoveBlocksFrom(instruction);
+                continue;
+            }
+            yield return instruction;
+        }
     }
 }

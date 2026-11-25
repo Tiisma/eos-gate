@@ -218,6 +218,24 @@ public class SombreterreGateTests
     }
 
     [Fact]
+    public void MenuTextsAreListedAndOtherFilesSkipped()
+    {
+        var folder = Directory.CreateTempSubdirectory("gate-menu-").FullName;
+        File.WriteAllText(Path.Combine(folder, "tips.txt"), "One\nTwo");
+        File.WriteAllText(Path.Combine(folder, "tips.fr.txt"), "Un");
+        File.WriteAllText(Path.Combine(folder, "panel.en.txt"), "<strong>Hi</strong>");
+        File.WriteAllText(Path.Combine(folder, "notes.txt"), "x");
+        File.WriteAllText(Path.Combine(folder, "panel.french.txt"), "x");
+
+        var pack = PackBuilder.Build("p", "1.22.7", Array.Empty<string>(), Array.Empty<string>(), null, "", null, null, folder);
+        var listed = JObject.Parse(pack.ManifestJson)["menu"]!.Select(m => m["file"]!.ToString()).ToList();
+
+        Assert.Equal(new[] { "panel.en.txt", "tips.fr.txt", "tips.txt" }, listed);
+        Assert.Equal(2, pack.Skipped.Count(s => s.StartsWith("menu")));
+        Directory.Delete(folder, true);
+    }
+
+    [Fact]
     public void ClaimDoesNotOverrideALink()
     {
         var store = new GateStore(null);

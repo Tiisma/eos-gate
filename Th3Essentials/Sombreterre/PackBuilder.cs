@@ -34,6 +34,9 @@ public class PackBuilder
         public List<string> Skipped = new();
         public List<string> OptionalModIds = new();
 
+        /// <summary>Main menu texts (tips, panel) served by name.</summary>
+        public Dictionary<string, PrivateFile> MenuFiles = new(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>The main menu logo, when the server has one.</summary>
         public PrivateFile? Logo;
 
@@ -54,9 +57,12 @@ public class PackBuilder
     public const int MaxBackgrounds = 100;
     public const long MaxBackgroundBytes = 8 * 1024 * 1024;
 
+    public const long MaxMenuFileBytes = 64 * 1024;
+    private static readonly Regex MenuFileNamePattern = new("^(tips|panel)(\\.[a-z]{2})?\\.txt$");
+
     private static readonly Regex BackgroundNamePattern = new("^[A-Za-z0-9][A-Za-z0-9 _.()-]{0,99}\\.(png|jpe?g)$", RegexOptions.IgnoreCase);
 
-    public static Result Build(string packName, string gameVersion, IEnumerable<string> folders, ICollection<string> modDbModIds, IEnumerable<string>? optionalFolders = null, string optimumVersion = "", string? backgroundsFolder = null, string? logoFile = null)
+    public static Result Build(string packName, string gameVersion, IEnumerable<string> folders, ICollection<string> modDbModIds, IEnumerable<string>? optionalFolders = null, string optimumVersion = "", string? backgroundsFolder = null, string? logoFile = null, string? menuFolder = null)
     {
         var result = new Result();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -76,6 +82,8 @@ public class PackBuilder
         if (optimumVersion.Length > 0 && IsOptimumVersion(optimumVersion)) manifest["optimum"] = optimumVersion;
         var backgrounds = CollectBackgrounds(result, backgroundsFolder);
         if (backgrounds.Count > 0) manifest["backgrounds"] = backgrounds;
+        var menu = CollectMenuFiles(result, menuFolder);
+        if (menu.Count > 0) manifest["menu"] = menu;
         if (logoFile != null && File.Exists(logoFile))
         {
             var size = new FileInfo(logoFile).Length;
@@ -145,6 +153,29 @@ public class PackBuilder
             }
         }
         return entries;
+    }
+
+    private static JArray CollectMenuFiles(Result result, string? folder)
+    {
+        var list = new JArray();
+        if (folder == null || !Directory.Exists(folder)) return list;
+        foreach (var path in Directory.EnumerateFiles(folder).OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+        {
+            var name = Path.GetFileName(path);
+            if (!MenuFileNamePattern.IsMatch(name))
+            {
+                result.Skipped.Add($"menu {name}: only tips.txt and panel.txt, optionally per language (tips.fr.txt), are read");
+                continue;
+            }
+            if (new FileInfo(path).Length > MaxMenuFileBytes)
+            {
+                result.Skipped.Add($"menu {name}: over {MaxMenuFileBytes / 1024} KB");
+                continue;
+            }
+            list.Add(new JObject { ["file"] = name, ["sha256"] = Sha256(path) });
+            result.MenuFiles[name] = new PrivateFile { FileName = name, FullPath = path };
+        }
+        return list;
     }
 
     private static JArray CollectBackgrounds(Result result, string? folder)

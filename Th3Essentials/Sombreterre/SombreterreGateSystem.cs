@@ -504,7 +504,10 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
             : Path.IsPathRooted(_config.BackgroundsFolder) ? _config.BackgroundsFolder : Path.Combine(GamePaths.DataPath, _config.BackgroundsFolder);
         var logo = string.IsNullOrWhiteSpace(_config.LogoFile) ? null
             : Path.IsPathRooted(_config.LogoFile) ? _config.LogoFile : Path.Combine(GamePaths.DataPath, _config.LogoFile);
-        var pack = PackBuilder.Build(_config.PackName, GameVersion.ShortGameVersion, folders, _config.ModDbModIds, optional, optimum, backgrounds, logo);
+        var menu = string.IsNullOrWhiteSpace(_config.MenuFolder) ? null
+            : Path.IsPathRooted(_config.MenuFolder) ? _config.MenuFolder : Path.Combine(GamePaths.DataPath, _config.MenuFolder);
+        var pack = PackBuilder.Build(_config.PackName, GameVersion.ShortGameVersion, folders, _config.ModDbModIds, optional, optimum, backgrounds, logo, menu);
+        _sapi.Logger.Notification($"[SombreterreGate] Pack: {pack.MenuFiles.Count(f => f.Key.StartsWith("tips"))} tip file(s), panel: {(pack.MenuFiles.Keys.Any(k => k.StartsWith("panel")) ? "yes" : "no")}.");
         _sapi.Logger.Notification($"[SombreterreGate] Pack: {pack.Backgrounds.Count} main menu background(s), {(pack.Logo == null ? "the game's own logo" : "the server's logo")}.");
         _sapi.Logger.Notification($"[SombreterreGate] Pack: Optimum {(optimum.Length == 0 ? "as built into the launcher" : optimum)}.");
         if (pack.OptionalModIds.Count > 0) _sapi.Logger.Notification($"[SombreterreGate] Pack: optional client mods {string.Join(", ", pack.OptionalModIds)}. With Stratum's ClientModPolicy on, list them in its AllowModIds.");

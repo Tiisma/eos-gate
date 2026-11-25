@@ -25,6 +25,7 @@ internal static class MenuLogo
 
     private static LoadedTexture? _logo;
     private static float _windowHeight = 1080;
+    private static float _windowWidth = 1920;
 
     /// <summary>Reads the logo file again. Called after each compose of the menu.</summary>
     public static void Refresh(ICoreClientAPI api, ILogger? logger)
@@ -58,6 +59,11 @@ internal static class MenuLogo
         if (height > 0) _windowHeight = height;
     }
 
+    public static void SetWindowWidth(float width)
+    {
+        if (width > 0) _windowWidth = width;
+    }
+
     /// <summary>Stands in for the menu's draw of its logo, with the same signature as IRenderAPI.Render2DTexture.</summary>
     public static void Draw(IRenderAPI render, int textureId, float posX, float posY, float width, float height, float z, Vec4f? color)
     {
@@ -70,6 +76,7 @@ internal static class MenuLogo
         var aspect = _logo.Width / (float)_logo.Height;
         var drawWidth = Math.Min(width, _windowHeight * MaxHeightShare * aspect);
         var drawHeight = drawWidth / aspect;
-        render.Render2DTexture(_logo.TextureId, posX + (width - drawWidth) / 2, posY, drawWidth, drawHeight, z, color);
+        // Centred across the window: without the game's left bar, the strip the game gives is not.
+        render.Render2DTexture(_logo.TextureId, (_windowWidth - drawWidth) / 2, posY, drawWidth, drawHeight, z, color);
     }
 }
