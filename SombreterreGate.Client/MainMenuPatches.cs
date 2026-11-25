@@ -68,6 +68,10 @@ internal static class MainMenuPatches
     private static readonly FieldInfo? SidebarField = AccessTools.Field(typeof(GuiCompositeMainMenuLeft), "sidebarBounds");
     private static readonly MethodInfo? OnSettingsMethod = AccessTools.Method(typeof(GuiCompositeMainMenuLeft), "OnSettings");
     private static readonly FieldInfo? CurrentScreenField = AccessTools.Field(typeof(ScreenManager), "CurrentScreen");
+    private static readonly FieldInfo? MainScreenField = AccessTools.Field(typeof(ScreenManager), "mainScreen");
+
+    /// <summary>The one button shown on the other screens (settings...), which the game's bar used to lead back from.</summary>
+    private static GuiComposer? _backComposer;
     private static readonly FieldInfo? QuoteTextureField = AccessTools.Field(typeof(GuiScreenMainRight), "quoteTexture");
     private static readonly FieldInfo? GrayBgField = AccessTools.Field(typeof(GuiScreenMainRight), "grayBg");
 
@@ -323,32 +327,56 @@ internal static class MainMenuPatches
             var font = CairoFont.ButtonText().WithFontSize(24);
             const double height = 52;
 
-            var composer = ScreenManager.GuiComposers.Create("compositemainmenu", ElementBounds.Fill).BeginChildElements();
+            var composer = ScreenManager.GuiComposers.Create("compositemainmenu", ElementBounds.Fill);
             for (var i = 0; i < buttons.Count; i++)
             {
                 var bounds = ElementBounds.Fixed(EnumDialogArea.CenterTop, 0, top + i * (height + ButtonGap), ButtonWidth, height);
                 composer.AddButton(buttons[i].Text, buttons[i].OnClick, bounds, font, EnumButtonStyle.Normal, buttons[i].Key);
             }
+            // Composed before the game's is let go, so a failure leaves the game's menu working.
+            composer.Compose();
+
+            _backComposer?.Dispose();
+            _backComposer = MainScreenField == null ? null : ScreenManager.GuiComposers.Create("eosmenuback", ElementBounds.Fill)
+                .AddButton(French ? "Retour" : "Back", () =>
+                {
+                    if (MainScreenField.GetValue(screenManager) is GuiScreen main) screenManager.LoadScreen(main);
+                    return true;
+                }, ElementBounds.Fixed(EnumDialogArea.LeftTop, 15, 15, 160, 44), CairoFont.ButtonText().WithFontSize(20), EnumButtonStyle.Normal, "eosback")
+                .Compose();
 
             (ComposerField.GetValue(screenManager) as GuiComposer)?.Dispose();
-            ComposerField.SetValue(screenManager, composer.EndChildElements().Compose());
+            ComposerField.SetValue(screenManager, composer);
             SidebarField.SetValue(menu, ElementBounds.Fixed(0, 0, 0, 0));
         }
         catch (Exception e)
         {
-            _logger?.Warning($"[SombreterreGate] Could not centre the main menu buttons, keeping the bar: {e.GetType().Name}");
+            _logger?.Warning($"[SombreterreGate] Could not centre the main menu buttons, keeping the bar: {e}");
         }
     }
 
-    /// <summary>The centred buttons belong to the main screen: on the others (settings...) they would cover the page.</summary>
-    private static void MainMenuOnMainScreenOnly(ScreenManager __instance, ref bool withMainMenu)
+    /// <summary>
+    /// The centred buttons belong to the main screen: on the others (settings...) they would cover the page,
+    /// so those get a Back button in the top left corner instead.
+    /// </summary>
+    private static void MainMenuOnMainScreenOnly(ScreenManager __instance, float dt, ref bool withMainMenu)
     {
-        if (!OnMainScreen(__instance)) withMainMenu = false;
+        if (!withMainMenu || OnMainScreen(__instance)) return;
+        withMainMenu = false;
+        _backComposer?.Render(dt);
+        _backComposer?.PostRender(dt);
     }
 
-    private static bool MenuInputOnMainScreenOnly(GuiCompositeMainMenuLeft __instance)
+    private static bool MenuInputOnMainScreenOnly(GuiCompositeMainMenuLeft __instance, MouseEvent e, MethodBase __originalMethod)
     {
-        return ScreenManagerField.GetValue(__instance) is not ScreenManager screenManager || OnMainScreen(screenManager);
+        if (ScreenManagerField.GetValue(__instance) is not ScreenManager screenManager || OnMainScreen(screenManager)) return true;
+        switch (__originalMethod.Name)
+        {
+            case "OnMouseDown": _backComposer?.OnMouseDown(e); break;
+            case "OnMouseUp": _backComposer?.OnMouseUp(e); break;
+            default: _backComposer?.OnMouseMove(e); break;
+        }
+        return false;
     }
 
     private static bool ServerTip(ref string __result)
@@ -375,7 +403,7 @@ internal static class MainMenuPatches
         }
         catch (Exception e)
         {
-            _logger?.Warning($"[SombreterreGate] Could not set the main menu texts: {e.GetType().Name}");
+            _logger?.Warning($"[SombreterreGate] Could not set the main menu texts: {e}");
         }
     }
 
@@ -396,23 +424,31 @@ internal static class MainMenuPatches
     private static void ReplacePanel(GuiScreenMainRight screen)
     {
         var text = MenuTexts.Read("panel");
-        var bounds = ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.RightBottom).WithFixedAlignmentOffset(-50, -50);
-        var composer = ScreenManager.GuiComposers.Create("welcomedialog", bounds);
+        GuiComposer composer;
         if (!string.IsNullOrWhiteSpace(text))
         {
+            // Built the way the game builds its welcome panel, with the server's text in it.
+            var bounds = ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.RightBottom).WithFixedAlignmentOffset(-50, -50);
             var textBounds = ElementBounds.Fixed(0, 0, 450, 500);
             var font = CairoFont.WhiteDetailText().WithFontSize(16).WithLineHeightMultiplier(1.15);
-            composer = composer
+            composer = ScreenManager.GuiComposers.Create("welcomedialog", bounds)
                 .AddShadedDialogBG(ElementStdBounds.DialogBackground().WithFixedPadding(GuiStyle.ElementToDialogPadding, GuiStyle.ElementToDialogPadding), false, 5, 0.8f)
-                .BeginChildElements(bounds)
+                .BeginChildElements()
                 .AddRichtext(text, font, textBounds, MenuTexts.OpenLink, "panel")
-                .EndChildElements();
-            composer.Compose();
-            var richtext = composer.GetRichtext("panel");
-            textBounds.fixedHeight = richtext.TotalHeight / GuiElement.scaled(1) + 5;
-            composer.ReCompose();
+                .EndChildElements()
+                .Compose();
+            var height = composer.GetRichtext("panel").TotalHeight / GuiElement.scaled(1);
+            if (height > 0)
+            {
+                textBounds.fixedHeight = height + 5;
+                composer.ReCompose();
+            }
         }
-        else composer.Compose();
+        else
+        {
+            // No panel: an empty composer, as the screen expects one.
+            composer = ScreenManager.GuiComposers.Create("welcomedialog", ElementBounds.Fixed(0, 0, 1, 1)).Compose();
+        }
 
         screen.ElementComposer?.Dispose();
         screen.ElementComposer = composer;
