@@ -106,8 +106,17 @@ public class GateConfig
     /// <summary>A launcher token unused for this many days stops working; the player links again.</summary>
     public int TokenIdleDays = 60;
 
-    /// <summary>Discord link attempts one address may start per ten minutes.</summary>
-    public int LinkSessionsPerAddress = 5;
+    /// <summary>
+    /// Discord link attempts one address may start within ten minutes before it has to wait, so a player
+    /// whose browser crashed can simply try again.
+    /// </summary>
+    public int LinkAttemptsBeforeWait = 3;
+
+    /// <summary>The first wait after too many link attempts, in minutes. Each further wait doubles.</summary>
+    public int LinkWaitMinutes = 5;
+
+    /// <summary>The longest wait between link attempts, in minutes. An hour without attempts, or a link that goes through, starts over.</summary>
+    public int LinkMaxWaitMinutes = 60;
 
     /// <summary>
     /// Oldest launcher version allowed to link, fetch the pack or get a ticket ("0.1.2"). Empty
@@ -135,6 +144,21 @@ public class GateConfig
     /// the server data folder.
     /// </summary>
     public List<string> OptionalPackFolders = new() { "SombreterrePackOptional" };
+
+    /// <summary>
+    /// Accept the anonymous metrics players agreed to send from the launcher and the client mod, and record
+    /// the server's own figures. Off: reports are refused and nothing is recorded.
+    /// </summary>
+    public bool MetricsEnabled = true;
+
+    /// <summary>Days metrics are kept on the server; older daily files are deleted.</summary>
+    public int MetricsRetentionDays = 30;
+
+    /// <summary>Days between two metrics summaries posted on Discord. 0: no summary.</summary>
+    public int MetricsSummaryDays = 7;
+
+    /// <summary>Discord channel for the metrics summary. 0: Th3Essentials' admin log channel.</summary>
+    public ulong MetricsChannelId = 0;
 
     /// <summary>Pack name shown in the manifest.</summary>
     public string PackName = "Sombreterre";

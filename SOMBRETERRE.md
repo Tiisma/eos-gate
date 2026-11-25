@@ -19,7 +19,7 @@ How it is protected:
 - A ticket expires after `TicketLifetimeSeconds` if unused, and one Discord account holds one at a time, so tickets cannot be stockpiled for others. Its first use binds it to the game account that presented it, which may then come back with it for `TicketSessionHours` (the menu's Play button); a ticket read off the (unencrypted) game connection is worthless to anyone else, since the server authenticates the game account itself.
 - Links are one to one and never replaced automatically.
 - Launcher tokens are stored server side as SHA-256 digests only, client side encrypted with the OS keyring, and expire after `TokenIdleDays` without use. `/gate revoke` and `/gate unlink` revoke them.
-- Link attempts are limited per address; `/gate lockdown true` stops new links, tickets and downloads at once.
+- Link attempts are limited per address: `LinkAttemptsBeforeWait` (3) in ten minutes, then a wait of `LinkWaitMinutes` (5), doubled at each further lockout up to `LinkMaxWaitMinutes` (60). An hour without attempts, or a link that goes through, starts over. `/gate lockdown true` stops new links, tickets and downloads at once.
 - Launchers older than `MinLauncherVersion` are refused.
 - Every link, first join, refusal and revocation is written to the server log and, when Th3Essentials has an `AdminLogChannelId`, to that Discord channel.
 - Mods from the ModDB are pinned to the SHA-256 of the archive the server runs.
@@ -37,6 +37,8 @@ What it does not protect against: whoever controls the server machine controls t
 | `Th3Essentials/Sombreterre/GateHttpApi.cs` | HTTP API for the launcher |
 | `Th3Essentials/Sombreterre/DiscordOAuth.cs` | Discord authorization-code exchange |
 | `Th3Essentials/Sombreterre/PackBuilder.cs` | Pack manifest from the mod folders |
+| `Th3Essentials/Sombreterre/MetricsBook.cs` | Anonymous metrics: what is kept, cleaning, daily files, retention, summary |
+| `Th3Essentials/Sombreterre/SombreterreGateSystem.Metrics.cs` | Metrics from the client mod and the server, clean-up and Discord summary |
 | `SombreterreGate.Client/` | Client mod: sends the ticket, trims the main menu, shows the server's backgrounds |
 | `SombreterreGate.Startup/` | Startup hook shipped in the client mod: the server's main menu from the game's first screen |
 | `Tests/SombreterreGate*.cs` | Unit tests and HTTP API tests |
@@ -69,12 +71,18 @@ What it does not protect against: whoever controls the server machine controls t
      "AutoWhitelist": true,
      "RefusalCooldownSeconds": 60,
      "TokenIdleDays": 60,
-     "LinkSessionsPerAddress": 5,
+     "LinkAttemptsBeforeWait": 3,
+     "LinkWaitMinutes": 5,
+     "LinkMaxWaitMinutes": 60,
      "MinLauncherVersion": "0.1.2",
      "BypassPlayerUids": [],
      "ModDbModIds": [],
      "AdditionalPackFolders": ["SombreterrePack"],
-     "PackName": "Sombreterre"
+     "PackName": "Sombreterre",
+     "MetricsEnabled": true,
+     "MetricsRetentionDays": 30,
+     "MetricsSummaryDays": 7,
+     "MetricsChannelId": 0
    }
    ```
 
@@ -150,6 +158,24 @@ The menu also offers **Creative world**: one creative-mode world per player, cre
 2. Optionally list one in `backgroundPaths` in `SombreterreGate.Client/modinfo.json`: that one shows on the very first menu, before the mod has run.
 3. Bump the version in that `modinfo.json`, rebuild and package the client mod with its `assets` folder (CI does it), replace the zip in `SombreterrePack/`, and run `/gate reloadpack`. Players get it on their next Play.
 
+## Anonymous metrics
+
+Players are asked once, in the launcher, whether they agree to send anonymous technical data; nothing is sent until they answer, and they can change their mind in the launcher's settings. When they agree:
+
+- the **launcher** posts to `POST /api/metrics`: its version, the game and Optimum versions, the operating system, CPU and GPU models, RAM rounded to the gigabyte, CPU threads, how long installing and syncing the pack took, the code of a failed launch, and its own crashes;
+- the **client mod** sends over its `sombreterremetrics` channel, once per session and ten minutes into play: frame rate (average and lowest, by the second, after the first minute), time to join and memory in use. The game's crashes are reported by the launcher once the game has closed, from `client-crash.log`.
+
+The gate also records the server's own figures every five minutes: time between ticks (average and worst), memory, players online and uptime.
+
+What is kept, and what is not:
+
+- Only the fields above, checked and bounded (`MetricsBook.cs`); anything else in a report is dropped. Crash traces are cleaned by the sender and again by the gate of file paths, e-mail and IP addresses and long identifiers.
+- No account name, UID, Discord id, token, address or session id is stored, and each record's time is rounded down to the hour.
+- `POST /api/metrics` takes no token, so nothing ties a report to an account. The caller's address only counts against a limit of 30 reports an hour, held in memory. Keep the proxy from logging that path (`log_skip` in the Caddyfile below).
+- Records are written in `ModData/SombreterreMetrics/`, one file per UTC day, and deleted after `MetricsRetentionDays` (30).
+
+Every `MetricsSummaryDays` (7) the gate posts a summary in `MetricsChannelId`, or Th3Essentials' admin log channel when it is 0: median frame rate, join times and memory, the most common hardware, launch errors, the most frequent crashes and the server's tick times. `/gate metrics [days]` shows it and posts it at once. `MetricsEnabled: false` refuses reports and records nothing.
+
 ## Going online
 
 `HttpListener` serves plain HTTP. For players outside this machine, put a reverse proxy with HTTPS in front of `HttpPrefix`, set `PublicBaseUrl` to its public address (ending with `/`), and update the launcher profile's `gateBaseUrl` and `packManifestUrl`. Keep `HttpPrefix` on loopback: the proxy is the only thing that should reach it.
@@ -168,6 +194,9 @@ The Early Access server uses [Caddy](https://caddyserver.com) on Windows, with t
    	tls {
    		dns duckdns YOUR_DUCKDNS_TOKEN
    	}
+   	# Anonymous metrics: never write their callers' addresses to the log.
+   	@metrics path /api/metrics
+   	log_skip @metrics
    	reverse_proxy 127.0.0.1:42421 {
    		# HttpListener only answers requests addressed to its own prefix.
    		header_up Host 127.0.0.1:42421
@@ -181,6 +210,8 @@ The Early Access server uses [Caddy](https://caddyserver.com) on Windows, with t
    	}
    }
    ```
+
+   `log_skip` needs Caddy 2.8 or later (older releases call it `skip_log`).
 
    `disable_redirects` stops Caddy from opening port 80 for HTTP-to-HTTPS redirects, which would collide with Apache.
 3. Open the firewall (PowerShell as administrator), and the same ports in the hosting provider's network firewall if it has one:

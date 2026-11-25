@@ -26,6 +26,14 @@ public class SombreterreGateHttpTests : IDisposable
         public void NotifyLinked(ulong discordId) { lock (Notified) Notified.Add(discordId); }
         public readonly List<(ulong DiscordId, string? Dropped)> WhitelistSyncs = new();
         public void SyncWhitelist(ulong discordId, string? droppedUid) { lock (WhitelistSyncs) WhitelistSyncs.Add((discordId, droppedUid)); }
+        public readonly List<JObject> Metrics = new();
+        public bool RecordMetrics(string kind, JObject report)
+        {
+            var record = MetricsBook.Clean(kind, report, DateTime.UtcNow);
+            if (record == null) return false;
+            lock (Metrics) Metrics.Add(record);
+            return true;
+        }
     }
 
     private const string Version = "0.1.2";
@@ -264,9 +272,11 @@ public class SombreterreGateHttpTests : IDisposable
         var missingPort = await _http.PostAsync("api/link/session", Body(new JObject { ["verifierHash"] = GateStore.Hash("v") }));
         Assert.Equal(HttpStatusCode.BadRequest, missingPort.StatusCode);
 
-        for (var i = 0; i < 5; i++) await CreateSession($"v{i}");
-        var sixth = await _http.PostAsync("api/link/session", Body(new JObject { ["verifierHash"] = GateStore.Hash("v6"), ["loopbackPort"] = 51234 }));
-        Assert.Equal((HttpStatusCode)429, sixth.StatusCode);
+        // Three attempts in a row are free (a crashed browser, a closed tab), then the address waits five minutes.
+        for (var i = 0; i < 3; i++) await CreateSession($"v{i}");
+        var fourth = await _http.PostAsync("api/link/session", Body(new JObject { ["verifierHash"] = GateStore.Hash("v3"), ["loopbackPort"] = 51234 }));
+        Assert.Equal((HttpStatusCode)429, fourth.StatusCode);
+        Assert.Equal(300, JObject.Parse(await fourth.Content.ReadAsStringAsync())["retryAfterSeconds"]!.Value<int>());
     }
 
     [Fact]
@@ -296,6 +306,26 @@ public class SombreterreGateHttpTests : IDisposable
         Assert.Equal((HttpStatusCode)423, (await _http.SendAsync(Authed(HttpMethod.Post, "api/ticket", token))).StatusCode);
         Assert.Equal((HttpStatusCode)423, (await _http.PostAsync("api/link/session", Body(new JObject { ["verifierHash"] = GateStore.Hash("v"), ["loopbackPort"] = 51234 }))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await _http.GetAsync("api/status")).StatusCode);
+    }
+
+    [Fact]
+    public async Task MetricsNeedNoTokenKeepOnlyListedFieldsAndAreCapped()
+    {
+        var report = new JObject { ["kind"] = "launcher", ["ramGb"] = 16, ["gpu"] = "NVIDIA GeForce RTX 4070", ["playerName"] = "alice", ["discordId"] = "1001" };
+        Assert.Equal(HttpStatusCode.OK, (await _http.PostAsync("api/metrics", Body(report))).StatusCode);
+        var stored = Assert.Single(_backend.Metrics);
+        Assert.Null(stored["playerName"]);
+        Assert.Null(stored["discordId"]);
+        Assert.Equal(16, stored["ramGb"]!.Value<int>());
+
+        // The server's own figures never come from outside, and unknown kinds are refused.
+        Assert.Equal(HttpStatusCode.BadRequest, (await _http.PostAsync("api/metrics", Body(new JObject { ["kind"] = "server", ["players"] = 999 }))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await _http.PostAsync("api/metrics", Body(new JObject { ["kind"] = "chat", ["text"] = "hi" }))).StatusCode);
+
+        // One address may only send so many per hour.
+        HttpStatusCode last = HttpStatusCode.OK;
+        for (var i = 0; i < 40; i++) last = (await _http.PostAsync("api/metrics", Body(report))).StatusCode;
+        Assert.Equal((HttpStatusCode)429, last);
     }
 
     public void Dispose()

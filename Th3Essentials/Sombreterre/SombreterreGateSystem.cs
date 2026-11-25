@@ -33,7 +33,7 @@ namespace Th3Essentials.Sombreterre;
 /// and, when Th3Essentials has an admin log channel, to Discord.
 /// </summary>
 // ReSharper disable once ClassNeverInstantiated.Global
-public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
+public partial class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
 {
     internal const string ConfigFile = "SombreterreGate.json";
     private const string StoreFile = "SombreterreGate-data.json";
@@ -125,8 +125,11 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
 
         sapi.Event.PlayerNowPlaying += OnPlayerNowPlaying;
         sapi.Event.PlayerChat += OnPlayerChat;
+        StartMetrics(sapi);
+
         sapi.Event.PlayerDisconnect += player =>
         {
+            _metricsPerPlayer.TryRemove(player.PlayerUID, out _);
             _admitted.TryRemove(player.PlayerUID, out _);
             _heldAt.TryRemove(player.PlayerUID, out _);
             _enteredAt.TryRemove(player.PlayerUID, out _);
@@ -188,6 +191,11 @@ public class SombreterreGateSystem : ModSystem, GateHttpApi.IBackend
                     Audit($"Staff revoked {revoked} launcher token(s) of Discord {discordId}.");
                     return TextCommandResult.Success($"{revoked} launcher token(s) revoked.");
                 })
+            .EndSubCommand()
+            .BeginSubCommand("metrics")
+                .WithDescription("Post the anonymous metrics summary of the last days now (default: MetricsSummaryDays)")
+                .WithArgs(sapi.ChatCommands.Parsers.OptionalInt("days", 0))
+                .HandleWith(args => MetricsCommand((int)args[0]))
             .EndSubCommand()
             .BeginSubCommand("lockdown")
                 .WithDescription("Stop or resume new links, tickets and pack downloads (players already in stay)")

@@ -29,6 +29,7 @@ namespace Th3Essentials.Sombreterre;
 ///   GET  /api/backgrounds/{file}     (token, whitelisted) one main menu background of that manifest
 ///   GET  /api/logo.png               (token, whitelisted) the main menu logo of that manifest
 ///   GET  /api/menu/{file}            (token, whitelisted) one main menu text (tips, panel) of that manifest
+///   POST /api/metrics                {kind, ...} anonymous metrics the player agreed to send; no token, see <see cref="MetricsBook"/>
 ///
 /// The launch flow never handles a Discord password or the OAuth client secret.
 ///
@@ -63,6 +64,9 @@ public class GateHttpApi : IDisposable
 
         /// <summary>True while staff has locked the gate: no new links, tickets or downloads.</summary>
         bool LockedDown { get; }
+
+        /// <summary>Stores one anonymous metrics report (see <see cref="MetricsBook"/>). False when it held nothing to keep or metrics are off.</summary>
+        bool RecordMetrics(string kind, JObject report);
     }
 
     private enum SessionState
@@ -88,8 +92,12 @@ public class GateHttpApi : IDisposable
     public const string LauncherVersionHeader = "X-EoS-Launcher-Version";
 
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan AddressWindow = TimeSpan.FromMinutes(10);
     private const int MaxBodyBytes = 4096;
+    private const int MaxMetricsBodyBytes = 16384;
+
+    /// <summary>Metrics reports one address may send per hour. The address is only held in memory for that hour.</summary>
+    private const int MetricsPerAddressPerHour = 30;
+    private static readonly TimeSpan MetricsWindow = TimeSpan.FromHours(1);
     private const int MaxSessions = 500;
 
     private readonly GateConfig _config;
@@ -99,7 +107,8 @@ public class GateHttpApi : IDisposable
     private readonly DiscordOAuth? _oauth;
     private readonly Version? _minLauncherVersion;
     private readonly Dictionary<string, LinkSession> _sessions = new();
-    private readonly Dictionary<string, List<DateTime>> _sessionsByAddress = new();
+    private readonly LinkThrottle _linkThrottle;
+    private readonly Dictionary<string, List<DateTime>> _metricsByAddress = new();
     private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _stop = new();
 
@@ -115,6 +124,7 @@ public class GateHttpApi : IDisposable
         if (!string.IsNullOrEmpty(config.OAuthClientId) && !string.IsNullOrEmpty(config.OAuthClientSecret))
             _oauth = new DiscordOAuth(config.OAuthClientId, config.OAuthClientSecret, config.PublicBase() + "api/link/callback");
         _minLauncherVersion = ParseVersion(config.MinLauncherVersion);
+        _linkThrottle = new LinkThrottle(config.LinkAttemptsBeforeWait, TimeSpan.FromMinutes(config.LinkWaitMinutes), TimeSpan.FromMinutes(config.LinkMaxWaitMinutes));
         _listener.Prefixes.Add(config.HttpPrefix);
     }
 
@@ -211,6 +221,9 @@ public class GateHttpApi : IDisposable
                 return;
             case ("POST", "/api/link/poll"):
                 await Poll(request, response);
+                return;
+            case ("POST", "/api/metrics"):
+                await Metrics(request, response);
                 return;
         }
 
@@ -359,13 +372,19 @@ public class GateHttpApi : IDisposable
         lock (_sessions)
         {
             Prune(now);
-            var recent = _sessionsByAddress.TryGetValue(address, out var times) ? times : _sessionsByAddress[address] = new List<DateTime>();
-            if (_sessions.Count >= MaxSessions || recent.Count >= Math.Max(1, _config.LinkSessionsPerAddress))
+            if (_sessions.Count >= MaxSessions)
             {
-                Json(response, 429, new { error = "busy" });
+                response.Headers["Retry-After"] = "60";
+                Json(response, 429, new { error = "busy", retryAfterSeconds = 60 });
                 return;
             }
-            recent.Add(now);
+            if (!_linkThrottle.TryStart(address, now, out var retryAfter))
+            {
+                var seconds = (int)Math.Ceiling(retryAfter.TotalSeconds);
+                response.Headers["Retry-After"] = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                Json(response, 429, new { error = "busy", retryAfterSeconds = seconds });
+                return;
+            }
             _sessions[id] = new LinkSession { VerifierHash = verifierHash.ToLowerInvariant(), LoopbackPort = port, CreatedUtc = now, Address = address };
         }
         Json(response, 200, new { session = id, url = _config.PublicBase() + "api/link/start?session=" + Uri.EscapeDataString(id) });
@@ -473,20 +492,51 @@ public class GateHttpApi : IDisposable
             return;
         }
 
+        _linkThrottle.Reset(session.Address);
         var token = _store.IssueToken(session.DiscordId, session.Name, DateTime.UtcNow);
         _backend.Audit($"Launcher linked to Discord {session.DiscordId} ({session.Name}) from {session.Address}.");
         _backend.NotifyLinked(session.DiscordId);
         Json(response, 200, new { status = "linked", token, discordName = session.Name });
     }
 
+    /// <summary>
+    /// One anonymous report. No token is asked for, so that nothing ties it to an account; the address
+    /// only counts against a per-hour limit, in memory, and is never stored with the report.
+    /// </summary>
+    private async Task Metrics(HttpListenerRequest request, HttpListenerResponse response)
+    {
+        var address = ClientAddress(request);
+        var now = DateTime.UtcNow;
+        lock (_metricsByAddress)
+        {
+            foreach (var (key, times) in _metricsByAddress.ToList())
+            {
+                times.RemoveAll(t => now - t > MetricsWindow);
+                if (times.Count == 0) _metricsByAddress.Remove(key);
+            }
+            var recent = _metricsByAddress.TryGetValue(address, out var list) ? list : _metricsByAddress[address] = new List<DateTime>();
+            if (recent.Count >= MetricsPerAddressPerHour)
+            {
+                Json(response, 429, new { error = "busy" });
+                return;
+            }
+            recent.Add(now);
+        }
+
+        var body = await ReadBody(request, MaxMetricsBodyBytes);
+        var kind = body?["kind"]?.ToString();
+        // The server's own figures never come from outside.
+        if (body == null || kind == null || kind == MetricsBook.Server)
+        {
+            Json(response, 400, new { error = "bad-request" });
+            return;
+        }
+        Json(response, _backend.RecordMetrics(kind, body) ? 200 : 400, new { ok = true });
+    }
+
     private void Prune(DateTime now)
     {
         foreach (var key in _sessions.Where(s => now - s.Value.CreatedUtc > SessionLifetime).Select(s => s.Key).ToList()) _sessions.Remove(key);
-        foreach (var (address, times) in _sessionsByAddress.ToList())
-        {
-            times.RemoveAll(t => now - t > AddressWindow);
-            if (times.Count == 0) _sessionsByAddress.Remove(address);
-        }
     }
 
     private bool LauncherIsRecentEnough(HttpListenerRequest request)
@@ -540,13 +590,13 @@ public class GateHttpApi : IDisposable
         return token.Length is > 0 and < 256 ? token : null;
     }
 
-    private static async Task<JObject?> ReadBody(HttpListenerRequest request)
+    private static async Task<JObject?> ReadBody(HttpListenerRequest request, int maxBytes = MaxBodyBytes)
     {
-        if (request.ContentLength64 > MaxBodyBytes) return null;
+        if (request.ContentLength64 > maxBytes) return null;
         using var reader = new StreamReader(request.InputStream, Encoding.UTF8);
-        var buffer = new char[MaxBodyBytes + 1];
+        var buffer = new char[maxBytes + 1];
         var read = await reader.ReadBlockAsync(buffer, 0, buffer.Length);
-        if (read > MaxBodyBytes) return null;
+        if (read > maxBytes) return null;
         try
         {
             return JObject.Parse(new string(buffer, 0, read));
